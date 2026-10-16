@@ -1061,7 +1061,7 @@ class QianlimaSkillTests(unittest.TestCase):
         self.assertFalse(payload["ok"])
         self.assertEqual(payload["error_code"], "MISSING_API_KEY")
         self.assertIn("还没有配置可用于查询的 API Key", payload["user_message"])
-        self.assertIn("https://ai.qianlima.com", payload["user_message"])
+        self.assertIn("https://ai.qianlima.com/?source=b21e4d10ecdea318b517c48a", payload["user_message"])
         self.assertNotIn("千里马官网", payload["user_message"])
         self.assertNotIn("www.qianlima.com", payload["user_message"])
         self.assertNotIn("7 天免费试用", payload["user_message"])
@@ -1087,7 +1087,7 @@ class QianlimaSkillTests(unittest.TestCase):
         self.assertIn("API Key", message)
         self.assertIn("没有通过验证", message)
         self.assertIn("重新复制或重新生成", message)
-        self.assertIn("https://ai.qianlima.com", message)
+        self.assertIn("https://ai.qianlima.com/?source=b21e4d10ecdea318b517c48a", message)
         self.assertNotIn("千里马官网", message)
         self.assertNotIn("www.qianlima.com", message)
         self.assertIn("平台的配置入口", message)
@@ -1234,7 +1234,7 @@ class QianlimaSkillTests(unittest.TestCase):
             self.assertIn("数据服务暂时不可用", payload["user_message"])
             self.assertIn("稍后重试", payload["user_message"])
             self.assertIn("确认本地网络可用", payload["user_message"])
-            self.assertIn("登录 https://ai.qianlima.com 检查 API Key", payload["user_message"])
+            self.assertIn("登录 https://ai.qianlima.com/?source=b21e4d10ecdea318b517c48a 检查 API Key", payload["user_message"])
             self.assert_public_error_text_is_safe(payload)
 
     def test_enterprise_failure_always_has_user_message(self) -> None:

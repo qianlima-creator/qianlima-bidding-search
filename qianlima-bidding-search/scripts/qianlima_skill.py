@@ -2103,21 +2103,21 @@ AUTH_ERROR_RULES: dict[str, dict[str, Any]] = {
         "summary": "还没有配置可用于查询的 API Key",
         "next_steps": [
             "如果您已经有 API Key，可以直接在当前对话里粘贴，我会用它继续查询",
-            "如果您还没有 API Key，请访问 https://ai.qianlima.com 注册或登录后获取，具体积分与充值规则以账号平台为准",
+            "如果您还没有 API Key，请访问 https://ai.qianlima.com/?source=b21e4d10ecdea318b517c48a 注册或登录后获取，具体积分与充值规则以账号平台为准",
             "如果平台提供配置入口，也可以把 API Key 填到平台的配置入口，之后就不用每次重复提供",
         ],
         "safety": ["不会自动打开网页", "不会在回答里展示您的 API Key", "不会把查询失败的结果改用其他网站补充"],
     },
     "10001": {
         "summary": "当前 API Key 没有通过验证",
-        "next_steps": ["请登录 https://ai.qianlima.com 重新复制或重新生成 API Key", "然后在当前对话里重新提供，或填入平台的配置入口"],
+        "next_steps": ["请登录 https://ai.qianlima.com/?source=b21e4d10ecdea318b517c48a 重新复制或重新生成 API Key", "然后在当前对话里重新提供，或填入平台的配置入口"],
     },
     "429": {
         "summary": "当前查询请求有点频繁",
         "next_steps": [
             "请稍等一会儿再试，不要连续重复提交同一个查询",
             "如果是在批量查询或连续翻页，请减少每次查询的数据量，间隔一会儿再继续",
-            "如果经常出现，请登录 https://ai.qianlima.com 查看调用频率或剩余额度",
+            "如果经常出现，请登录 https://ai.qianlima.com/?source=b21e4d10ecdea318b517c48a 查看调用频率或剩余额度",
         ],
     },
 }
@@ -2127,13 +2127,13 @@ EXPLICIT_API_ERROR_RULES: dict[str, dict[str, Any]] = {
     "10004": {"summary":"接口参数异常", "next_steps":["请由 Agent 按当前接口契约修正参数"]},
     "10005": {"summary":"项目详情不存在", "next_steps":["请从当前结果选择其他项目"]},
     "10006": {"summary":"项目详情已撤回", "next_steps":["请从当前结果选择其他项目"]},
-    "10007": {"summary":"当前无权查看详情", "next_steps":["请前往 https://ai.qianlima.com 核对访问权限"]},
-    "10010": {"summary":"当前账号无权查看该数据", "next_steps":["请前往 https://ai.qianlima.com 核对数据权限"]},
+    "10007": {"summary":"当前无权查看详情", "next_steps":["请前往 https://ai.qianlima.com/?source=b21e4d10ecdea318b517c48a 核对访问权限"]},
+    "10010": {"summary":"当前账号无权查看该数据", "next_steps":["请前往 https://ai.qianlima.com/?source=b21e4d10ecdea318b517c48a 核对数据权限"]},
     "10011": {"summary":"原文链接不存在", "next_steps":["仍可使用结果中的详情页链接"]},
-    "10028": {"summary":"当前查询地区权限不足", "next_steps":["请前往 https://ai.qianlima.com 核对地区权限"]},
-    "10030": {"summary":"积分余额不足", "next_steps":["请前往 https://ai.qianlima.com 查看积分或充值"]},
+    "10028": {"summary":"当前查询地区权限不足", "next_steps":["请前往 https://ai.qianlima.com/?source=b21e4d10ecdea318b517c48a 核对地区权限"]},
+    "10030": {"summary":"积分余额不足", "next_steps":["请前往 https://ai.qianlima.com/?source=b21e4d10ecdea318b517c48a 查看积分或充值"]},
     "10031": {"summary":"积分扣除失败", "next_steps":["请稍后重试，本次未自动重复请求"]},
-    "10032": {"summary":"积分账户尚未初始化或正在初始化", "next_steps":["请稍后查看，或前往 https://ai.qianlima.com 核对"]},
+    "10032": {"summary":"积分账户尚未初始化或正在初始化", "next_steps":["请稍后查看，或前往 https://ai.qianlima.com/?source=b21e4d10ecdea318b517c48a 核对"]},
     "10036": {"summary":"原文链接本月获取次数已用完", "next_steps":["请查看月度次数及重置时间"]},
     "10037": {"summary":"积分结算已超时", "next_steps":["请先核对当前结果与积分记录，再决定是否重新查询"]},
     "10038": {"summary":"请求仍在处理中", "next_steps":["请稍后查看，避免连续重复提交"]},
@@ -2147,7 +2147,7 @@ EXPLICIT_API_ERROR_RULES: dict[str, dict[str, Any]] = {
 
 GENERIC_ACCOUNT_ACCESS_RULE: dict[str, Any] = {
     "summary": "当前账号无法完成本次查询",
-    "next_steps": ["请登录 https://ai.qianlima.com 核对当前积分和数据权限"],
+    "next_steps": ["请登录 https://ai.qianlima.com/?source=b21e4d10ecdea318b517c48a 核对当前积分和数据权限"],
     "safety": ["不会绕过数据权限获取结果"],
 }
 
@@ -2170,7 +2170,7 @@ def build_entitlement_diagnosis(data: Any, target_right: str, trigger: str) -> d
 
 def entitlement_diagnosis_message(diagnosis: dict[str, Any]) -> str:
     if not diagnosis.get("checked"):
-        return "当前积分信息暂时无法确认，可前往[账号平台](https://ai.qianlima.com)核对。"
+        return "当前积分信息暂时无法确认，可前往[账号平台](https://ai.qianlima.com/?source=b21e4d10ecdea318b517c48a)核对。"
     wallet = diagnosis["wallet"]
     if not isinstance(wallet, dict):
         return "当前积分信息：" + clean_user_value(wallet) + "。"
@@ -2267,7 +2267,7 @@ def generic_error_rule(error: SkillError, stage: str | None = None) -> dict[str,
             "next_steps": [
                 "请稍后重试",
                 "如果您正在连续查询或翻页，请先停一会儿再继续",
-                "如果多次重试仍失败，请确认本地网络可用，或登录 https://ai.qianlima.com 检查 API Key 后联系平台处理",
+                "如果多次重试仍失败，请确认本地网络可用，或登录 https://ai.qianlima.com/?source=b21e4d10ecdea318b517c48a 检查 API Key 后联系平台处理",
             ],
             "safety": ["不会显示接口状态码、网络异常或代码栈", "不会自动改用其他网站或模型记忆补结果"],
         }
