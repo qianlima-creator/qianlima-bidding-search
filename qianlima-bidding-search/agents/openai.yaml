@@ -1,0 +1,7 @@
+interface:
+  display_name: "招投标信息查询｜千里马·乙方宝"
+  short_description: "搜索招中标及采购商机，查看项目详情、企业分析和账号积分"
+  brand_color: "#0F766E"
+  default_prompt: "使用 $qianlima-bidding-search 查询招投标商机、公司与企业情报，并按需查看单条详情、正文、附件、进展或当前积分。"
+policy:
+  allow_implicit_invocation: true
