@@ -3,7 +3,7 @@
 面向支持 Agent Skills（`SKILL.md`）的智能助手，通过自然语言查询招投标信息、发现采购商机、跟进项目进展，并开展招投标视角的企业分析。
 
 **Skill 名称：** `qianlima-bidding-search`  
-**版本：** `v1.0.0`  
+**版本：** `v1.0.1`  
 **账号与 API Key：** [千里马账号平台](https://ai.qianlima.com/?source=b21e4d10ecdea318b517c48a)
 
 ## 功能
