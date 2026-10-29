@@ -3,7 +3,7 @@
 面向支持 Agent Skills（`SKILL.md`）的智能助手，通过自然语言查询招投标信息、发现采购商机、跟进项目进展，并开展招投标视角的企业分析。
 
 **Skill 名称：** `qianlima-bidding-search`  
-**版本：** `v1.0.1`  
+**版本：** `v1.0.2`  
 **账号与 API Key：** [千里马账号平台](https://ai.qianlima.com/?source=b21e4d10ecdea318b517c48a)
 
 ## 功能
@@ -27,6 +27,10 @@
 - 有效的千里马 API Key，以及所需的数据访问权限和调用额度。
 
 ### 2. 获取并配置 API Key
+
+可在会话内按 Skill 的文字引导完成手机号验证码注册／登录。开始前检查当前凭据与宿主可用的配置、加载能力；取得 API Key 后，由宿主 Agent 按配置规则保存、私有读回核对，并加载到查询进程。取得 Key 不等于配置成功，只有保存、读回和加载均完成后才能确认配置成功；实际跨会话复用能力取决于宿主。
+
+也可通过网站获取 Key：
 
 访问 [https://ai.qianlima.com/?source=b21e4d10ecdea318b517c48a](https://ai.qianlima.com/?source=b21e4d10ecdea318b517c48a) 注册或登录，获取 API Key，并查看价格、积分、充值与地区权限。
 
@@ -103,7 +107,11 @@ cp -R qianlima-bidding-search ~/.codex/skills/
 ## 查询范围与结果说明
 
 - 项目搜索需要有效关键词；完整单位名称或项目编号也可用于相应位置的检索。只有地区或分类时，需要补充最小必要关键词。
-- 北京、上海、天津、重庆、香港、澳门、台湾暂不支持区县级筛选。涉及这些地区的精确区县请求时，会先说明实际范围并确认是否接受整体范围。
+- 北京、上海、天津、重庆支持区县筛选；香港、澳门、台湾暂不支持区县筛选。涉及受限地区的精确区县请求时，先说明实际范围并确认是否接受整体范围。
+- 普通项目时间范围最多 3 个日历年：日期包含周年边界日全天，明确时分秒时按周年时刻比较。
+- 采购意向的发布时间和预计采购时间分别最多 3 个日历年；月份差最多 36 个月，包含边界月。不跨两个时间字段比较跨度；未传预计采购时间时默认未来第 1 至第 3 个月。
+- 临期项目的服务到期范围最多 5 个日历年，包含周年边界日；闰日按目标年 2 月末日处理，合同期限枚举保持不变。
+- 时间范围超限时请用户调整，不自动截短或拆分查询。
 - 查询事实来自当次接口响应；无权限、失败或零结果时，会说明实际情况。
 - 详情中的空值按 Skill 规则显示为“未公示”；具体信息以公告、附件及返回的来源链接为准。
 - 正文与原文链接属于不同资源，可明确指定需要哪一种。
@@ -129,6 +137,7 @@ cp -R qianlima-bidding-search ~/.codex/skills/
 - [完整 Skill 指令](./qianlima-bidding-search/SKILL.md)
 - [使用案例](./qianlima-bidding-search/references/usage-examples.md)
 - [账号入口与访问限制](./qianlima-bidding-search/references/account-access.md)
+- [凭据配置说明](./qianlima-bidding-search/references/credential-configuration.md)
 - [常见问题](./qianlima-bidding-search/references/faq.md)
 - [接口说明](./qianlima-bidding-search/references/api.md)
 

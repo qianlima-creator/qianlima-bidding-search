@@ -12,7 +12,7 @@ import qianlima_skill as runtime
 class FlatAreaTests(unittest.TestCase):
     def test_parenthesized_limits_are_never_discarded(self):
         self.assertEqual(a.catalog().match('北京（海淀区）'), [(3320,)])
-        self.assertEqual(a.resolve('北京（海淀区）')['resolution_status'], 'unsupported')
+        self.assertEqual(a.resolve('北京（海淀区）')['effective_query']['areaIds'], [3320])
         for name, parent in [('香港（九龙）', None), ('朝阳区', '北京（海淀区）')]:
             self.assertNotIn('effective_query', a.resolve(name, parent=parent))
 

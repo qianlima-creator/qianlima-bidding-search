@@ -50,10 +50,10 @@ class ApiV3Tests(unittest.TestCase):
         for begin,end in [('2026-02-30','2026-03-01'),('2026-09-01 25:00:00','2026-09-02'),('2026-09-01 10:00:00','2026-09-01 09:59:59')]:
             with self.subTest(begin=begin), self.assertRaises(r.SkillError): r.normalize_query(project(beginTime=begin,endTime=end))
 
-    def test_purchase_expiring_all_scopes(self):
-        for fn in [r.normalize_purchase_search_query,r.normalize_expiring_search_query]:
-            q,_=fn({'keywords':['设备'],'matchScopes':list(range(1,11))})
-            self.assertEqual(q['matchScopes'],list(range(1,11)))
+    def test_purchase_and_expiring_have_separate_scopes(self):
+        for fn, scopes in [(r.normalize_purchase_search_query,[1,2,8,10]),(r.normalize_expiring_search_query,list(range(1,11)))]:
+            q,_=fn({'keywords':['设备'],'matchScopes':scopes})
+            self.assertEqual(q['matchScopes'],scopes)
 
     def test_new_commands_exist(self):
         parser=r.build_parser()

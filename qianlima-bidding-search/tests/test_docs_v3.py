@@ -22,13 +22,14 @@ class DocumentationV3Tests(unittest.TestCase):
         for word in ['中标','采购意向','临期','企业','正文','附件','进展','积分']:
             self.assertIn(word,description)
         body=self.skill.split('---',2)[2]
-        self.assertLessEqual(len(re.sub(r'\s+','',body)),3523)
+        # 在原入口基线上补齐凭据配置触发条件与缺 Key 检查顺序，保留短入口约束。
+        self.assertLessEqual(len(re.sub(r'\s+','',body)),3820)
         for command in ['search','search-purchase','search-expiring','search-company','enterprise','full-text','attachments','timeline','entitlement','next','refine','detail']:
             self.assertIn('`'+command,self.skill)
         ui=(ROOT/'agents/openai.yaml').read_text()
         self.assertIn('allow_implicit_invocation: true',ui)
         self.assertIn('$qianlima-bidding-search',ui)
-        self.assertEqual(json.loads((ROOT/'manifest.json').read_text())['version'],'1.0.1')
+        self.assertEqual(json.loads((ROOT/'manifest.json').read_text())['version'],'1.0.2')
 
     def test_all_relative_document_links_exist(self):
         for p in self.docs:
@@ -63,7 +64,8 @@ class DocumentationV3Tests(unittest.TestCase):
         for filename in ['api-purchase-intentions.md','api-expiring-projects.md']:
             text=(ROOT/'references'/filename).read_text()
             for field in ['keywords','keywordsSearchType','matchScopes']:self.assertIn(field,text)
-            for scope in range(1,11):self.assertIn('`'+str(scope)+'`',text)
+            scopes = [1,2,8,10] if filename == 'api-purchase-intentions.md' else range(1,11)
+            for scope in scopes:self.assertIn('`'+str(scope)+'`',text)
         strategy=(ROOT/'references/capabilities/query-strategy.md').read_text()
         for phrase in ['标题+正文+附件','不自创','不改 AND 为 OR','公司 ID 精确过滤','首次']:
             self.assertIn(phrase,strategy+self.skill)

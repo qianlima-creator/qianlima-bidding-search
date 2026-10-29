@@ -201,7 +201,7 @@ class QianlimaSkillTests(unittest.TestCase):
         self.assertTrue(payload["ok"])
         self.assertEqual(query_field(payload["effective_query"], 'matchScopes'), [2, 8, 10])
 
-    def test_project_id_scope_is_supported_for_expiring_and_purchase(self) -> None:
+    def test_project_id_scope_is_supported_for_expiring_but_not_purchase(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             expiring = self.run_skill(
                 "search-expiring",
@@ -228,8 +228,8 @@ class QianlimaSkillTests(unittest.TestCase):
 
         self.assertTrue(expiring["ok"])
         self.assertEqual(query_field(expiring["request_query"], 'matchScopes'), [3])
-        self.assertTrue(purchase["ok"])
-        self.assertEqual(purchase["request_query"]["matchScopes"], [3])
+        self.assertFalse(purchase["ok"])
+        self.assertEqual(purchase["error_code"], "AGENT_QUERY_CORRECTION_REQUIRED")
 
 
     def test_preflight_complex_accepts_compact_semantic_plan(self) -> None:
@@ -1060,21 +1060,8 @@ class QianlimaSkillTests(unittest.TestCase):
 
         self.assertFalse(payload["ok"])
         self.assertEqual(payload["error_code"], "MISSING_API_KEY")
-        self.assertIn("还没有配置可用于查询的 API Key", payload["user_message"])
-        self.assertIn("https://ai.qianlima.com/?source=b21e4d10ecdea318b517c48a", payload["user_message"])
-        self.assertNotIn("千里马官网", payload["user_message"])
-        self.assertNotIn("www.qianlima.com", payload["user_message"])
-        self.assertNotIn("7 天免费试用", payload["user_message"])
-        self.assertIn("当前对话里粘贴", payload["user_message"])
-        self.assertIn("平台的配置入口", payload["user_message"])
-        self.assertNotIn("Skill 配置入口", payload["user_message"])
-        self.assertNotIn("`QIANLIMA_API_KEY`", payload["user_message"])
-        self.assertNotIn("终端", payload["user_message"])
-        self.assertNotIn("环境变量", payload["user_message"])
-        self.assertIn("您可以这样处理", payload["user_message"])
-        self.assertIn("安全说明", payload["user_message"])
-        self.assertIn("不会自动打开网页", payload["user_message"])
-        self.assertIn("不会在回答里展示您的 API Key", payload["user_message"])
+        self.assertIn("[前往官网](https://ai.qianlima.com/?source=b21e4d10ecdea318b517c48a)", payload["user_message"])
+        self.assertEqual(payload["user_message"].count("**"), 4)
 
     def test_invalid_api_key_has_user_friendly_message(self) -> None:
         spec = importlib.util.spec_from_file_location("qianlima_skill", SCRIPT)
@@ -1086,11 +1073,11 @@ class QianlimaSkillTests(unittest.TestCase):
 
         self.assertIn("API Key", message)
         self.assertIn("没有通过验证", message)
-        self.assertIn("重新复制或重新生成", message)
+        self.assertIn("手机号验证码登录后重新配置", message)
         self.assertIn("https://ai.qianlima.com/?source=b21e4d10ecdea318b517c48a", message)
         self.assertNotIn("千里马官网", message)
         self.assertNotIn("www.qianlima.com", message)
-        self.assertIn("平台的配置入口", message)
+        self.assertIn("提供其他 API Key", message)
         self.assertNotIn("Skill 配置入口", message)
         self.assertNotIn("无效KEY", message)
 
@@ -2443,14 +2430,13 @@ class QianlimaSkillTests(unittest.TestCase):
         self.assertNotIn("effective_query", payload)
         self.assertIn("请确认", payload["user_message"])
 
-    def test_area_known_unsupported_district_has_no_executable_query(self) -> None:
+    def test_area_known_municipality_district_has_executable_query(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             code, payload = self.run_skill_with_fixtures(
                 FIXTURES, "area", "--name", "海淀区", state_path=Path(tmp) / "state.json")
         self.assertEqual(code, 0)
-        self.assertNotIn("effective_query", payload)
-        self.assertEqual(payload["resolution_status"], "unsupported")
-        self.assertIn("海淀区", payload["user_message"])
+        self.assertEqual(payload["effective_query"]["areaIds"], [3320])
+        self.assertEqual(payload["resolution_status"], "resolved")
         self.assertNotIn("expansion_suggestion", payload)
 
     def test_area_scope_names_do_not_select_lower_same_name_entry(self) -> None:
@@ -2499,12 +2485,8 @@ class QianlimaSkillTests(unittest.TestCase):
                         state_path=root / f"state-{index}.json",
                     )
                     self.assertEqual(code, 0)
-                    if expected == [3316]:
-                        self.assertEqual(payload["resolution_status"], "unsupported")
-                        self.assertNotIn("effective_query", payload)
-                    else:
-                        self.assertEqual(payload["effective_query"]["areaIds"], expected)
-                        self.assertEqual(len(payload["areas"]), 1)
+                    self.assertEqual(payload["effective_query"]["areaIds"], expected)
+                    self.assertEqual(len(payload["areas"]), 1)
 
     def test_purchase_search_rejects_inverted_planned_purchase_date(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

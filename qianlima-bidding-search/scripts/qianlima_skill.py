@@ -139,7 +139,7 @@ ENTERPRISE_QUERY_FIELDS: dict[str, frozenset[str]] = {
 }
 
 PROJECT_MATCH_SCOPES = frozenset(range(1, 11))
-PURCHASE_MATCH_SCOPES = PROJECT_MATCH_SCOPES
+PURCHASE_MATCH_SCOPES = frozenset({1, 2, 8, 10})
 EXPIRING_MATCH_SCOPES = PROJECT_MATCH_SCOPES
 SEARCH_SORT_TYPES = frozenset({1, 2, 6})
 ENTERPRISE_SORT_TYPES = frozenset({1, 2})
@@ -754,11 +754,10 @@ def validate_snapshot(snapshot: Any, session_id: str, result_set_id: str, *, for
     if snapshot.get("result_type") == "project" and snapshot.get("origin") != "timeline":
         try:
             migrated = migrate_project_query(effective_query)
-            # A valid historical district query can now be unsupported. Keep it
-            # readable so an explicitly accepted scope can replace it via refine;
-            # every search/next/refine still validates the resulting query.
+            # Keep historical scopes and time spans readable for refine. Every
+            # search/next/refine validates the resulting query before execution.
             historical_ids = normalize_area_ids(migrated.pop("areaIds")) if "areaIds" in migrated else []
-            normalized = normalize_query({**migrated, AMOUNT_UNIT_CONFIRMATION_FIELD: True})[0]
+            normalized = normalize_query({**migrated, AMOUNT_UNIT_CONFIRMATION_FIELD: True}, check_time_span=False)[0]
             for page_field in ("currentPage", "numPerPage"):
                 if page_field not in effective_query:
                     normalized.pop(page_field, None)
@@ -1001,6 +1000,28 @@ def normalize_int_list_enum(value: Any, field: str, allowed: frozenset[int]) -> 
     return normalized
 
 
+def normalize_purchase_match_scopes(value: Any, *, strict: bool = False) -> list[int]:
+    # Preserve the CLI's existing numeric coercion; the transport accepts only
+    # canonical arrays. Neither path drops or substitutes an unsupported scope.
+    try:
+        if strict and (not isinstance(value, list) or not value or any(
+            type(item) is not int or item not in PURCHASE_MATCH_SCOPES for item in value
+        )):
+            raise ValueError
+        return normalize_int_list_enum(value, "matchScopes", PURCHASE_MATCH_SCOPES)
+    except (SkillError, ValueError):
+        raise correction_error(
+            "AGENT_QUERY_CORRECTION_REQUIRED",
+            "采购意向 matchScopes 必须是仅包含 1、2、8、10 的非空整数数组。",
+            "按用户已明确的检索位置修正：1=标题+正文+附件，2=标题，8=正文，10=附件。"
+            "未指定位置时可省略；不得删除非法元素、改用默认范围或替换位置来放宽条件。"
+            "采购意向不支持编号、采购单位、中标单位、代理机构、联系人、标的物专用位置；"
+            "不能等价表达时说明能力限制，不自动重查。",
+            invalid_field="matchScopes",
+            allowed_values=sorted(PURCHASE_MATCH_SCOPES),
+        )
+
+
 def validate_date_order(query: dict[str, Any], begin_field: str, end_field: str, message: str) -> None:
     if not query.get(begin_field) or not query.get(end_field):
         return
@@ -1017,6 +1038,40 @@ def validate_month_order(query: dict[str, Any], begin_field: str, end_field: str
     end_month = dt.datetime.strptime(str(query[end_field]), "%Y-%m")
     if begin_month > end_month:
         raise SkillError("INVALID_QUERY", message)
+
+
+def validate_time_span(
+    query: dict[str, Any], begin_field: str, end_field: str,
+    years: int, label: str, *, date_format: str = "%Y-%m-%d",
+) -> None:
+    """Check an inclusive calendar span without changing either endpoint."""
+    if not query.get(begin_field) or not query.get(end_field):
+        return
+    try:
+        start = dt.datetime.strptime(str(query[begin_field]), date_format)
+        end = dt.datetime.strptime(str(query[end_field]), date_format)
+    except ValueError as exc:
+        raise SkillError("INVALID_QUERY", f"{label}格式无效，请调整时间条件后再查。") from exc
+    if start > end:
+        raise SkillError("INVALID_QUERY", f"{label}开始不能晚于结束。")
+    if start.year + years > 9999:
+        return  # Every representable end is within the limit.
+    limit = start.replace(year=start.year + years,
+                          day=min(start.day, calendar.monthrange(start.year + years, start.month)[1]))
+    # Date-only project queries are normalized to full days. Preserve that
+    # inclusive boundary after normalization, paging and transport validation.
+    if start.time() == dt.time.min and end.time() == dt.time(23, 59, 59):
+        limit = limit.replace(hour=23, minute=59, second=59)
+    if end > limit:
+        raise SkillError("TIME_SPAN_EXCEEDED",
+                         f"{label}跨度最多 {years} 年，当前范围为 {query[begin_field]} 至 {query[end_field]}。"
+                         "请调整起止时间后再查；本次未执行搜索，未截短或拆分时间范围。")
+
+
+def validate_purchase_time_spans(query: dict[str, Any]) -> None:
+    validate_time_span(query, "beginTime", "endTime", 3, "采购意向公告发布时间")
+    validate_time_span(query, "startPlanPurchaseDate", "endPlanPurchaseDate", 3,
+                       "预计采购时间", date_format="%Y-%m")
 
 
 def amount_confirmation_instruction(amount: float) -> str:
@@ -1186,7 +1241,7 @@ def shift_project_month(value: dt.datetime, offset: int) -> dt.datetime:
         raise SkillError("INVALID_QUERY", "发布时间超出可查询的日期范围。") from exc
 
 
-def normalize_query(raw: dict[str, Any], *, force_page: int | None = None) -> tuple[dict[str, Any], list[str]]:
+def normalize_query(raw: dict[str, Any], *, force_page: int | None = None, check_time_span: bool = True) -> tuple[dict[str, Any], list[str]]:
     warnings: list[str] = []
     reject_unsupported_fields(raw, PROJECT_SEARCH_FIELDS, "普通项目搜索")
     raw = dict(raw)
@@ -1217,6 +1272,8 @@ def normalize_query(raw: dict[str, Any], *, force_page: int | None = None) -> tu
             raise SkillError("INVALID_QUERY", "开始时间不能晚于结束时间，请调整时间范围后再查。")
         query["beginTime"] = start.strftime("%Y-%m-%d %H:%M:%S")
         query["endTime"] = end.strftime("%Y-%m-%d %H:%M:%S")
+        if check_time_span:
+            validate_time_span(query, "beginTime", "endTime", 3, "标讯发布时间", date_format="%Y-%m-%d %H:%M:%S")
     else:
         warnings.append("未传时间参数，接口默认按近一个月查询。")
     validate_amount_unit(query)
@@ -1264,6 +1321,7 @@ def normalize_intelligence_query(
     default_warning: str | None = None,
     default_warning_fields: tuple[str, ...] = (),
     require_service_expire_pair: bool = False,
+    check_time_span: bool = True,
 ) -> tuple[dict[str, Any], list[str]]:
     warnings: list[str] = []
     reject_unsupported_fields(raw, allowed_fields, endpoint_label)
@@ -1323,6 +1381,9 @@ def normalize_intelligence_query(
         "endPlanPurchaseDate",
         "预计采购时间范围开始不能晚于结束，请确认后再查。",
     )
+
+    if check_time_span and require_service_expire_pair:
+        validate_time_span(query, "beginServiceExpireTime", "endServiceExpireTime", 5, "服务到期时间")
 
     amount_fields = tuple(
         (field, "金额")
@@ -2101,16 +2162,18 @@ def user_detail_failure_message(
 AUTH_ERROR_RULES: dict[str, dict[str, Any]] = {
     "MISSING_API_KEY": {
         "summary": "还没有配置可用于查询的 API Key",
-        "next_steps": [
-            "如果您已经有 API Key，可以直接在当前对话里粘贴，我会用它继续查询",
-            "如果您还没有 API Key，请访问 https://ai.qianlima.com/?source=b21e4d10ecdea318b517c48a 注册或登录后获取，具体积分与充值规则以账号平台为准",
-            "如果平台提供配置入口，也可以把 API Key 填到平台的配置入口，之后就不用每次重复提供",
-        ],
+        "next_steps": ["""**千里马AI 数据平台**\\
+让你的AI 即刻拥有4.5 亿+招投标数据，注册即赠 500 积分
+
+**注册流程：**\\
+① 回复 11 位手机号 → ② 输入短信验证码 → ③ 自动获取并配置 API Key
+
+[前往官网](https://ai.qianlima.com/?source=b21e4d10ecdea318b517c48a)  · 已有 API Key 可直接在会话提供"""],
         "safety": ["不会自动打开网页", "不会在回答里展示您的 API Key", "不会把查询失败的结果改用其他网站补充"],
     },
     "10001": {
         "summary": "当前 API Key 没有通过验证",
-        "next_steps": ["请登录 https://ai.qianlima.com/?source=b21e4d10ecdea318b517c48a 重新复制或重新生成 API Key", "然后在当前对话里重新提供，或填入平台的配置入口"],
+        "next_steps": ["可以通过手机号验证码登录后重新配置，也可以提供其他 API Key", "也可登录 https://ai.qianlima.com/?source=b21e4d10ecdea318b517c48a 获取或检查 API Key"],
     },
     "429": {
         "summary": "当前查询请求有点频繁",
@@ -2285,6 +2348,8 @@ def generic_error_rule(error: SkillError, stage: str | None = None) -> dict[str,
 
 
 def render_user_error_from_rule(rule: dict[str, Any]) -> str:
+    if rule is AUTH_ERROR_RULES["MISSING_API_KEY"]:
+        return rule["next_steps"][0]
     lines = [f"{rule['summary']}。"]
     next_steps = [str(step).strip() for step in rule.get("next_steps") or [] if str(step).strip()]
     if next_steps:
@@ -2479,6 +2544,10 @@ def failure_payload(
             payload["cards"] = []
         payload["user_message"] = generic_user_message(error, stage)
         return payload
+    if error.code == "TIME_SPAN_EXCEEDED":
+        payload["cards"] = []
+        payload["user_message"] = display_message
+        return payload
     if error.code == "INVALID_QUERY":
         payload["cards"] = []
         payload["user_message"] = f"这次没有继续查询。\n\n{display_message}\n\n请您确认后我再查。"
@@ -2579,9 +2648,11 @@ def validate_endpoint_request(method: str, path: str, query: dict[str, Any] | No
         checked[AMOUNT_UNIT_CONFIRMATION_FIELD] = True
         normalize_query(checked)
     elif path == "/api/search/purchase":
+        validate_purchase_time_spans(effective_query)
         if "matchScopes" in effective_query:
-            normalize_int_list_enum(effective_query["matchScopes"], "matchScopes", PURCHASE_MATCH_SCOPES)
+            normalize_purchase_match_scopes(effective_query["matchScopes"], strict=True)
     elif path == "/api/search/expiring":
+        validate_time_span(effective_query, "beginServiceExpireTime", "endServiceExpireTime", 5, "服务到期时间")
         if "matchScopes" in effective_query:
             normalize_int_list_enum(effective_query["matchScopes"], "matchScopes", EXPIRING_MATCH_SCOPES)
         if "procurementMethod" in effective_query:
@@ -2787,26 +2858,32 @@ class SearchCapabilitySpec:
         self.include_stage_on_success = include_stage_on_success
 
 
-def normalize_project_search_query(raw_query: dict[str, Any], *, force_page: int | None = None) -> tuple[dict[str, Any], list[str]]:
-    return normalize_query(raw_query, force_page=force_page)
+def normalize_project_search_query(raw_query: dict[str, Any], *, force_page: int | None = None, check_time_span: bool = True) -> tuple[dict[str, Any], list[str]]:
+    return normalize_query(raw_query, force_page=force_page, check_time_span=check_time_span)
 
 
-def normalize_purchase_search_query(raw_query: dict[str, Any], *, force_page: int | None = None) -> tuple[dict[str, Any], list[str]]:
-    return normalize_intelligence_query(
+def normalize_purchase_search_query(raw_query: dict[str, Any], *, force_page: int | None = None, check_time_span: bool = True) -> tuple[dict[str, Any], list[str]]:
+    if "matchScopes" in raw_query:
+        raw_query = {**raw_query, "matchScopes": normalize_purchase_match_scopes(raw_query["matchScopes"])}
+    query, warnings = normalize_intelligence_query(
         raw_query,
         allowed_fields=PURCHASE_SEARCH_FIELDS,
+        check_time_span=check_time_span,
         endpoint_label="采购意向搜索",
         match_scopes=PURCHASE_MATCH_SCOPES,
         force_page=force_page,
         default_warning="未传预计采购时间时，采购意向接口默认按未来 1 到 3 个月查询。",
         default_warning_fields=("startPlanPurchaseDate", "endPlanPurchaseDate"),
     )
+    if check_time_span:
+        validate_purchase_time_spans(query)
+    return query, warnings
 
-
-def normalize_expiring_search_query(raw_query: dict[str, Any], *, force_page: int | None = None) -> tuple[dict[str, Any], list[str]]:
+def normalize_expiring_search_query(raw_query: dict[str, Any], *, force_page: int | None = None, check_time_span: bool = True) -> tuple[dict[str, Any], list[str]]:
     return normalize_intelligence_query(
         raw_query,
         allowed_fields=EXPIRING_SEARCH_FIELDS,
+        check_time_span=check_time_span,
         endpoint_label="临期项目搜索",
         match_scopes=EXPIRING_MATCH_SCOPES,
         force_page=force_page,
@@ -3270,7 +3347,9 @@ def query_continuation_context(args: argparse.Namespace, *, company: bool = Fals
             # Full context restores a previously executed effective query. Its
             # inherited amounts already use yuan; only refine changes need a
             # fresh unit check. Keep all other source and parameter validation.
-            effective_query = search_capability(result_type).normalize_query({**query, AMOUNT_UNIT_CONFIRMATION_FIELD: True})[0]
+            effective_query = search_capability(result_type).normalize_query(
+                {**query, AMOUNT_UNIT_CONFIRMATION_FIELD: True}, check_time_span=False,
+            )[0]
         session_id = search_session_id(args)
         snapshot = {
             "state_version": STATE_VERSION, "session_id": session_id,
@@ -3993,6 +4072,9 @@ def main(argv: list[str] | None = None) -> int:
             if isinstance(exc.data, dict):
                 payload.update(exc.data)
             payload["agent_instruction"] = "先使用对话中已明确的必要内容补全上下文；只澄清实际缺失的信息，不默认重搜，不猜条件或页码。"
+        elif exc.code == "TIME_SPAN_EXCEEDED":
+            payload["cards"] = []
+            payload["user_message"] = display_message
         elif is_account_access_error(exc):
             payload["user_message"] = permission_user_message(exc, args.command)
         elif exc.code in AGENT_CORRECTION_ERROR_CODES:

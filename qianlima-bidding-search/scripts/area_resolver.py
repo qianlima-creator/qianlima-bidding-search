@@ -9,7 +9,7 @@ from pathlib import Path
 REFERENCES = Path(__file__).resolve().parents[1] / 'references'
 MUNICIPALITIES = {2, 24, 26, 31}
 SPECIAL_ROOTS = {3557, 3558, 3559}
-LIMITED_DISTRICT_ROOTS = MUNICIPALITIES | SPECIAL_ROOTS
+LIMITED_DISTRICT_ROOTS = SPECIAL_ROOTS
 NATIONAL = {'全国', '全国范围', '不限地区', '取消地区限制'}
 REGION_GROUPS = {'华东': ['上海市', '江苏省', '浙江省', '安徽省', '福建省', '江西省', '山东省'],
  '华东区': ['上海市', '江苏省', '浙江省', '安徽省', '福建省', '江西省', '山东省'],

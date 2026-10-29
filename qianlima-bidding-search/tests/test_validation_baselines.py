@@ -24,7 +24,7 @@ DETAIL_RETEST = ROOT / "scripts" / "retest_detail_followups.py"
 LIVE_CASES = ROOT / "tests" / "live_validation_cases.json"
 FIXTURES = ROOT / "tests" / "fixtures"
 RELEASE_VERSION = json.loads((ROOT / "manifest.json").read_text())["version"]
-RELEASE_PACKAGE = ROOT.parent / "dist" / f"qianlima-bidding-search-v{RELEASE_VERSION}.zip"
+RELEASE_PACKAGE = Path(os.environ.get("QIANLIMA_TEST_PACKAGE", str(ROOT.parent / "dist" / f"qianlima-bidding-search-v{RELEASE_VERSION}.zip")))
 
 
 def load_module(path: Path, name: str) -> Any:
@@ -440,8 +440,26 @@ class ValidationBaselineTests(unittest.TestCase):
         ]
 
         if not RELEASE_PACKAGE.exists():
-            self.skipTest("解压后的发布包内没有外层 dist 文件，仅在源码交付目录校验包一致性。")
+            self.skipTest("未指定候选包且外层候选路径不存在，包一致性在交付轮次单独校验。")
         with zipfile.ZipFile(RELEASE_PACKAGE) as archive:
+            # Account changes must be present in the candidate as well as routing.
+            critical_paths += [
+                "scripts/qianlima_account.py",
+                "references/account-access.md",
+                "references/credential-configuration.md",
+                "references/faq.md",
+                "tests/test_account_key_output.py",
+            ]
+            # Text-only onboarding must not ship dormant card instructions or tools.
+            for relative in (
+                "references/registration-cards.md", "scripts/render_registration_card.py",
+                "assets/phone.html", "tests/test_registration_cards.py",
+                "tests/test_registration_cards.cjs",
+            ):
+                self.assertNotIn(f"{ROOT.name}/{relative}", archive.namelist())
+            manifest = json.loads(archive.read(f"{ROOT.name}/manifest.json"))
+            for script in manifest["runtime"]["scripts"]:
+                self.assertIn(f"{ROOT.name}/{script}", archive.namelist())
             for relative in critical_paths:
                 archived = f"{ROOT.name}/{relative}"
                 with self.subTest(path=relative):

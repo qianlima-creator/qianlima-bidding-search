@@ -25,7 +25,7 @@ class AreaResolutionTests(unittest.TestCase):
 
     def test_union_does_not_split_conjunction_inside_place_name(self):
         for text, parent, expected in [('天津、和平区', None, 'ambiguous'),
-                                       ('和平和河西', '天津', 'unsupported'),
+                                       ('和平和河西', '天津', 'resolved'),
                                        ('呼和浩特和北京', None, 'resolved')]:
             with self.subTest(text=text):
                 result = self.resolve(text, parent=parent)
@@ -68,11 +68,7 @@ class AreaResolutionTests(unittest.TestCase):
             with self.subTest(phrase=phrase):
                 self.assertEqual(runtime.area_resolver.catalog().match(phrase), [tuple(ids)])
                 p = self.resolve(phrase)
-                if ids[0] in {3320, 3411}:
-                    self.assertEqual(p['resolution_status'], 'unsupported')
-                    self.assertNotIn('effective_query', p)
-                else:
-                    self.assertEqual(p['effective_query'].get('areaIds'), ids)
+                self.assertEqual(p['effective_query'].get('areaIds'), ids)
 
     def test_ambiguity_has_no_executable_query(self):
         p = self.resolve('朝阳区')
@@ -94,8 +90,7 @@ class AreaResolutionTests(unittest.TestCase):
 
     def test_parent_constraint_disambiguates(self):
         p = self.resolve('朝阳区', parent='北京')
-        self.assertEqual(p['resolution_status'], 'unsupported')
-        self.assertIn('北京市', p['user_message'])
+        self.assertEqual(p['effective_query']['areaIds'], [3316])
 
     def test_conflicting_parent_never_relocates(self):
         p = self.resolve('深圳南山区', parent='北京')
@@ -114,10 +109,7 @@ class AreaResolutionTests(unittest.TestCase):
 
     def test_shared_explicit_parent(self):
         p = self.resolve('海淀和朝阳', parent='北京')
-        self.assertEqual(p['resolution_status'], 'unsupported')
-        self.assertNotIn('effective_query', p)
-        self.assertIn('海淀区', p['user_message'])
-        self.assertIn('朝阳区', p['user_message'])
+        self.assertEqual(p['effective_query']['areaIds'], [3320, 3316])
 
     def test_explicit_conjunction_does_not_invent_parent(self):
         p = self.resolve('北京和朝阳区')

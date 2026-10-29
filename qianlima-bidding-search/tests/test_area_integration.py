@@ -54,7 +54,7 @@ class AreaIntegrationTests(unittest.TestCase):
 
     def test_index_node_is_not_a_district_expansion(self):
         self.assertIsNone(r.district_area_expansion({'areaIds': [1274]}))
-        self.assertIsNone(r.district_area_expansion({'areaIds': [3320]}))
+        self.assertEqual(r.district_area_expansion({'areaIds': [3320]})['refine_query'], {'areaIds': [2]})
         self.assertEqual(r.district_area_expansion({'areaIds': [2807]})['refine_query'], {'areaIds': [316]})
         self.assertIsNone(r.district_area_expansion({'areaIds': [618]}))
 

@@ -6,7 +6,7 @@
 
 真实联调前 `GET /api/user/verify` 确认账号与 Skill 权限；成功 data 的 `username` 仅供账号核对，不主动展示。此验证不是普通每次搜索的额外前置请求。
 
-API 通用外层是 `code/msg/data/success`，以 code 200 判断业务成功，其他业务码按 API 返回处理。Skill 不按 data 的字段、类型、空值或对象编号再次判断成败。字段为空或 null 表示信息未公示，0 和 false 保留原意。
+查询 API 通用外层是 `code/msg/data/success`，以 code 200 判断业务成功，其他业务码按 API 返回处理。Skill 不按 data 的字段、类型、空值或对象编号再次判断成败。字段为空或 null 表示信息未公示，0 和 false 保留原意。
 
 ## 按能力读取
 
@@ -116,3 +116,33 @@ python3 scripts/qianlima_skill.py refine --context-json '{"result_type":"project
 上述各例仅在与原成功输出全部条件一致时使用；有其他地区、金额、排序等字段须全部复制。公司样例见 [企业能力](capabilities/enterprise-intelligence.md)。原 API `effective_query` 无须追加金额确认字段，已执行金额直接继承；新的/改变的小额由 Agent 自行核对原话单位。完整上下文或缓存页大小超过三源 100/公司 20 时先纠正，不静默缩小改变分页；新查询默认规则不变。
 
 `AREA_SCOPE_UNSUPPORTED`：指定区县目前只能返回更大范围，查询未发出。按 [地区规则](../SKILL.md#地区) 确认实际范围后重试，不自动替换地区编号。
+
+
+## 账号接口与凭据配置
+
+账号脚本独立使用 `https://ai.qianlima.com`（前端同源 `/api` 契约），不从查询域名推导，不接收对话任意 URL；HTTPS 不跟随重定向。账号响应 `code/message/data/requestId` 的成功码为 0，不套用查询的 200。
+
+| 接口 | 用途 |
+|---|---|
+| `GET /api/legal?type=TERMS`、`PRIVACY` | 脚本在 verify 内部取得后端必填版本；Agent 无需调用或传回 |
+| `POST /api/auth/sms/send` | phone 发码；成功 data 可为 null |
+| `POST /api/auth/login` | phone/smsCode/agreementVersion/privacyVersion/sourceCode；新用户注册，老用户登录 |
+| `POST /api/api-keys/{keyId}/reveal` | 默认 Key 不完整时用本次 Bearer token 获取；不另行创建、重置、启用 Key |
+| `GET /api/points/account` | 同一 token 读取 availablePoints，0 有效；赠送与实际余额分别判断 |
+| `POST /api/auth/logout` | Key 和余额请求结束后尽力清理临时 token，失败不撤销 Key |
+
+### 调用和状态
+
+账号命令不选择宿主、不自动读写平台配置。工具返回 Key 后的保存、加载和自动接续统一见[API Key 配置与使用](credential-configuration.md)。
+
+`python3 scripts/qianlima_account.py prepare` 在本地取得唯一引导文案，不发起网络请求；无查询任务加 `--no-query`。`--has-key` 仅在执行侧已确认有 Key 时使用。只有用户明确要求换号或换 Key 才进入更换流程；首次配置不询问替换，不增加网页探测。
+
+`python3 scripts/qianlima_account.py register --input-stdin` 从 stdin 接收 JSON。发码仅需 `action=send`、`phone`、`consent=true`，不要求、不比对协议版本，也不重新请求协议接口；后端发码请求仅包含 `phone`。验证登录仅需 `action=verify`、`phone`、`smsCode`、`consent=true`。脚本在提交登录前自动获取后端必填的 `agreementVersion` 和 `privacyVersion`，与固定来源码一起填入登录请求；Agent 无需记忆或传回版本，旧调用额外传入的版本字段不参与组装。prepare 不获取版本，verify 不比较版本、不重复获取或自动重试。版本接口失败或返回无效版本时以 `stage=legal` 停止，尚未提交验证码，不登录、不取 Key、不写配置、不重发短信；不得让用户补版本或误报验证码错误。默认无需 `--credential-fd` 或管道。发码成功回执为 `status=sms_sent`、本次提交的完整 `phone` 和 `expires_in_seconds`，不再返回 `phone_masked`；号码可在本次登录对话中原样展示。`consent=true` 根据用户本轮明确的发码／登录操作请求设置，不表示已阅读或同意法律协议；不为此追加协议确认。手机号和验证码不写命令行参数。send 与 verify 显式分开，不隐式重发；登录失败按接口实际结果反馈，不将本地参数缺失解释为协议变化。
+
+登录请求的 `sourceCode` 由本主包固定为 `b21e4d10ecdea318b517c48a`，与网站入口的 `source` 相同。无需用户提供，stdin 中的来源字段不能覆盖包内值。仅登录请求带此字段，不写入发码、协议、余额、退出或查询参数；不为来源额外请求或自动重试。不能仅凭客户端传参就宣称后台归因成功；老用户不要求来源回填。
+
+默认验证成功返回 `status=credential_available`、完整 `api_key`、`login_completed=true`、`configuration_written=false`、`current_environment_loaded=false`，另返回本次提交的完整手机号 `phone`、新老用户标识、实际余额和退出状态。Agent 在已获保存授权及替换条件满足时立即按用户提供 Key 的同一规则配置；不要等待用户重发 Key 或配置指令。取得 Key 和脚本退出码 0 均不表示已保存或加载。
+
+失败、取消或结果未知时不返回 `api_key`；验证码失败不获取 Key、不保存、不重发。余额或退出失败不否定已取得的 Key，分别按实际字段反馈。脚本不输出验证码、token 或完整认证原响应。显式使用旧 `--credential-fd N` 的调用仍返回不含 Key 的 `credential_ready`，无效管道仍拒绝登录；普通会话不使用此兼容入口。查询端继续读取 `QIANLIMA_API_KEY`，不负责平台配置。
+
+认证响应不进入查询 `api_responses`；临时 token／验证码不持久保存，不做跨调用认证恢复。用户交互见 [账号接入](account-access.md)，失败见 [FAQ](faq.md)。

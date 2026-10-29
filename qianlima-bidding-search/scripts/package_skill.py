@@ -10,6 +10,12 @@ from pathlib import Path
 
 
 EXCLUDE_PARTS = {
+    ".git",
+    ".codex",
+    ".env",
+    "config.toml",
+    "config.json",
+    "credentials.json",
     "__pycache__",
     ".pytest_cache",
     ".qianlima-skill-state",
@@ -38,6 +44,8 @@ def has_excluded_prefix(path: Path) -> bool:
 
 
 def should_include(path: Path) -> bool:
+    if path.is_symlink() or path.name.startswith('.env.') or path.name.endswith('.env'):
+        return False
     if any(part in EXCLUDE_PARTS for part in path.parts):
         return False
     if has_excluded_prefix(path):
@@ -47,7 +55,7 @@ def should_include(path: Path) -> bool:
 
 def package(skill_dir: Path, output: Path) -> Path:
     output.parent.mkdir(parents=True, exist_ok=True)
-    with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+    with zipfile.ZipFile(output, "x", compression=zipfile.ZIP_DEFLATED) as zf:
         for path in sorted(skill_dir.rglob("*")):
             if path.is_file() and should_include(path):
                 zf.write(path, path.relative_to(skill_dir.parent))

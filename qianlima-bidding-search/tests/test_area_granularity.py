@@ -1,4 +1,4 @@
-"""Known district-granularity limits must stop silent scope widening."""
+"""Municipality districts retain their scope through every search entry point."""
 import json
 import os
 import sys
@@ -31,25 +31,25 @@ class AreaGranularityTests(unittest.TestCase):
         q.update({'keywordGroups': [{'keywords': ['设备'], 'matchScopes': [2, 9]}]} if source == 'project' else {'keywords': ['设备']})
         return q
 
-    def test_known_district_is_identified_but_not_executable(self):
-        for name, parent, whole in [('海淀', None, '北京市'), ('上海浦东', None, '上海市'),
-                                    ('河西区', '天津', '天津市'), ('城口县', '重庆', '重庆市'),
-                                    ('北京（海淀区）', None, '北京市')]:
+    def test_known_districts_resolve_without_widening(self):
+        for name, parent in [('海淀', None), ('上海浦东', None),
+                             ('河西区', '天津'), ('城口县', '重庆'),
+                             ('北京（海淀区）', None)]:
             with self.subTest(name=name):
                 p = a.resolve(name, parent=parent)
-                self.assertEqual(p['resolution_status'], 'unsupported', p)
-                self.assertNotIn('effective_query', p)
-                self.assertIn('是否', p['user_message'])
-                self.assertIn(whole, p['user_message'])
+                self.assertEqual(p['resolution_status'], 'resolved', p)
+                ids = p['effective_query']['areaIds']
+                self.assertTrue(all(len(a.catalog().chains[i]) >= 3 for i in ids))
+                self.assertNotIn('user_message', p)
 
-    def test_all_86_catalog_districts_are_blocked_without_deleting_ids(self):
+    def test_all_86_catalog_districts_preserve_ids(self):
         c = a.catalog()
         ids = [i for i,chain in c.chains.items() if chain[0] in a.MUNICIPALITIES
                and len(chain) >= 3 and i not in c.upper_choices]
         self.assertEqual(len(ids), 86)
         self.assertEqual(c.validate_ids(ids), ids)
         for i in ids:
-            self.assertEqual(c.resolve(c.by_id[i]['name'])['resolution_status'], 'unsupported')
+            self.assertEqual(c.resolve(c.by_id[i]['name'])['effective_query']['areaIds'], [i])
 
     def test_whole_regions_and_other_districts_remain_executable(self):
         for name, ids in [('北京', [2]), ('上海', [24]), ('天津', [26]), ('重庆', [31]),
@@ -59,16 +59,12 @@ class AreaGranularityTests(unittest.TestCase):
 
     def test_ambiguity_resolved_before_capability_decision(self):
         self.assertEqual(a.resolve('朝阳区')['resolution_status'], 'ambiguous')
-        self.assertEqual(a.resolve('朝阳区', parent='北京')['resolution_status'], 'unsupported')
+        self.assertEqual(a.resolve('朝阳区', parent='北京')['effective_query']['areaIds'], [3316])
         self.assertEqual(a.resolve('朝阳区', parent='长春')['effective_query']['areaIds'], [3181])
 
-    def test_mixed_request_does_not_execute_partial_scope(self):
+    def test_mixed_request_keeps_both_districts(self):
         p = a.resolve('深圳南山区、北京海淀区')
-        self.assertEqual(p['resolution_status'], 'unsupported')
-        self.assertNotIn('effective_query', p)
-        self.assertIn('北京市', p['user_message'])
-        self.assertIn('区县', p['user_message'])
-        self.assertEqual(p['unresolved_parts'], ['北京海淀区'])
+        self.assertEqual(p['effective_query']['areaIds'], [2807, 3320])
 
     def test_unmapped_special_region_qualifiers_preserved(self):
         for name, parent in [('香港（九龙）', None), ('九龙', '香港'),
@@ -78,44 +74,58 @@ class AreaGranularityTests(unittest.TestCase):
             self.assertIn(name, p['user_message'])
             self.assertIn('暂不支持区县', p['user_message'])
 
-    def test_three_searches_reject_direct_district_ids_before_client_creation(self):
+    def test_three_searches_send_district_ids_and_preserve_filters(self):
         for source, command, _ in self.sources:
-            args = r.build_parser().parse_args([command, '--query-json', json.dumps(self.query(source, [3320]))])
-            with self.subTest(source=source), patch.object(r, 'build_client', side_effect=AssertionError('受限查询不应创建API客户端')) as client:
-                p = args.func(args)
-                self.assertFalse(p['ok'])
-                self.assertEqual(p['error_code'], 'AREA_SCOPE_UNSUPPORTED')
-                client.assert_not_called()
+            for ids in ([2], [3320], [2807, 3320]):
+                query = dict(self.query(source, ids), excludeWords=['维修'])
+                args = r.build_parser().parse_args([command, '--query-json', json.dumps(query)])
+                calls = []
+                def request(client, method, path, query=None):
+                    r.validate_endpoint_request(method, path, query)
+                    calls.append(dict(query))
+                    client.last_request_path, client.last_request_query = path, dict(query)
+                    return {'rowCount': 0, 'pageCount': 0, 'list': []}
+                with self.subTest(source=source, ids=ids), patch.object(r.ApiClient, '_request', request):
+                    p = args.func(args)
+                    self.assertTrue(p['ok'], p)
+                    self.assertEqual(len(calls), 1)
+                    self.assertEqual(calls[0]['areaIds'], ids)
+                    self.assertEqual(calls[0]['excludeWords'], ['维修'])
 
-    def test_low_level_guard_rejects_districts_for_all_three_sources(self):
+    def test_low_level_guard_accepts_districts_for_all_three_sources(self):
         for source, _, _ in self.sources:
             path = {'project':'/api/search', 'purchase_intention':'/api/search/purchase', 'expiring_project':'/api/search/expiring'}[source]
             with self.subTest(source=source):
-                with self.assertRaises(r.SkillError) as e:
-                    r.validate_endpoint_request('POST', path, self.query(source, [3320]))
-                self.assertEqual(e.exception.code, 'AREA_SCOPE_UNSUPPORTED')
+                r.validate_endpoint_request('POST', path, self.query(source, [3320]))
 
-    def test_complex_preflight_has_no_executable_operations(self):
+    def test_complex_preflight_preserves_district_scope(self):
         for source, _, _ in self.sources:
             plan = {'conditions': [{'id':'k','type':'keyword','value':'设备'}, {'id':'a','type':'area','value':[3320]}],
                     'operations':[{'id':'s','action':'search','data_source':source}]}
             p = preflight_complex_plan(plan, r.normalize_complex_operation)
-            self.assertFalse(p['ok'])
-            self.assertEqual(p['approved_operations'], [])
+            self.assertTrue(p['ok'], p)
+            self.assertEqual(p['approved_operations'][0]['query']['areaIds'], [3320])
 
-    def test_old_district_sessions_cannot_page_or_refine_without_fixing_scope(self):
+    def test_old_district_sessions_can_page_and_refine_without_widening(self):
         for source, _, _ in self.sources:
-            with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, {'QIANLIMA_SKILL_STATE_DIR':tmp}):
-                snap = r.save_search_snapshot(session_id=str(uuid.uuid4()),result_type=source,
-                       effective_query=self.query(source,[3320]),viewed_cards=[],total_count=20,page_count=4)
-                ctx = ['--session-id',snap['session_id'],'--result-set-id',snap['result_set_id']]
-                for command in [['next',*ctx], ['refine',*ctx,'--query-json','{"excludeWords":["维修"]}']]:
-                    args = r.build_parser().parse_args(command)
-                    with patch.object(r,'build_client', side_effect=AssertionError('受限旧会话不应创建API客户端')) as client:
-                        try:p = args.func(args)
-                        except r.SkillError as e:self.assertEqual(e.code,'AREA_SCOPE_UNSUPPORTED')
-                        else:self.assertEqual(p['error_code'],'AREA_SCOPE_UNSUPPORTED')
-                        client.assert_not_called()
+            snap = r.save_search_snapshot(session_id=str(uuid.uuid4()), result_type=source,
+                   effective_query=self.query(source,[3320]), viewed_cards=[], total_count=20, page_count=4)
+            ctx = ['--session-id',snap['session_id'],'--result-set-id',snap['result_set_id']]
+            for command in [['next',*ctx], ['refine',*ctx,'--query-json','{"excludeWords":["维修"]}']]:
+                calls = []
+                def request(client, method, path, query=None):
+                    r.validate_endpoint_request(method, path, query)
+                    calls.append(dict(query))
+                    client.last_request_path, client.last_request_query = path, dict(query)
+                    return {'rowCount':20,'pageCount':4,'list':[]}
+                args = r.build_parser().parse_args(command)
+                with self.subTest(source=source, command=command[0]), patch.object(r.ApiClient,'_request',request):
+                    p = args.func(args)
+                    self.assertTrue(p['ok'], p)
+                    self.assertEqual(calls[0]['areaIds'], [3320])
+                    self.assertEqual(calls[0]['currentPage'], 2 if command[0] == 'next' else 1)
+                    if command[0] == 'refine':
+                        self.assertEqual(calls[0]['excludeWords'], ['维修'])
 
     def test_accepted_whole_scope_keeps_other_conditions_and_displays_true_scope(self):
         for source, command, normalize_name in self.sources:
