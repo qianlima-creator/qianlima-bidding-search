@@ -18,7 +18,7 @@ from test_account_flow import FakeAPI, LoginAPI, account, inputs
 
 class KeyOutputTests(unittest.TestCase):
     def run_cli(self, api, data=None, command=None):
-        data = inputs(action='verify', smsCode='1234') if data is None else data
+        data = inputs(action='verify', smsCode='012345') if data is None else data
         with patch.object(account, 'AccountAPI', return_value=api), \
              patch.object(account, 'CodexConfig', side_effect=AssertionError('native config')), \
              patch.object(account, 'PrivateHandoff', side_effect=AssertionError('private handoff')), \
@@ -74,7 +74,7 @@ class KeyOutputTests(unittest.TestCase):
                 api = LoginAPI()
                 _, sent, _ = self.run_cli(api, inputs(phone=phone))
                 _, verified, _ = self.run_cli(api, inputs(
-                    action='verify', phone=phone, smsCode='1234'))
+                    action='verify', phone=phone, smsCode='012345'))
                 self.assertEqual(sent['phone'], phone)
                 self.assertEqual(verified['phone'], phone)
                 requests = [c for c in api.calls if c[1] in (
@@ -119,7 +119,7 @@ class KeyOutputTests(unittest.TestCase):
                                 ({'smsCode': ''}, 'code_required')]:
             with self.subTest(status=status):
                 api = LoginAPI()
-                data = inputs(action='verify', smsCode='1234')
+                data = inputs(action='verify', smsCode='012345')
                 data.update(changes)
                 code, result, _ = self.run_cli(api, data)
                 self.assertEqual(code, 1)
@@ -213,7 +213,7 @@ sys.argv = ['account', 'register', '--input-stdin']
 raise SystemExit(account.main())
 '''
         child = subprocess.run([sys.executable, '-c', child_code, str(Path(__file__).parent)],
-                               input=json.dumps(inputs(action='verify', smsCode='1234')),
+                               input=json.dumps(inputs(action='verify', smsCode='012345')),
                                capture_output=True, text=True, timeout=10)
         self.assertEqual(child.returncode, 0, child.stderr)
         self.assertEqual(child.stderr, '')

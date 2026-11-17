@@ -89,7 +89,7 @@ class CodexRPC:
             stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, env=env, bufsize=0)
         self.seq, self.buffer = 0, b''
         try:
-            self.call('initialize', {'clientInfo': {'name': 'qianlima-account', 'version': '1.0.2'},
+            self.call('initialize', {'clientInfo': {'name': 'qianlima-account', 'version': '1.0.3'},
                                     'capabilities': {'experimentalApi': True}})
             self.proc.stdin.write(b'{"method":"initialized","params":{}}\n')
         except Exception:
@@ -280,18 +280,52 @@ def prepare(api, pending_query=True, has_key=False):
     return dict(status='prepared', guidance=guidance)
 
 
+def normalize_register_input(data):
+    """Validate local input; the calling Agent owns conversation authorization.
+
+    Omitted consent is supported. Explicit false still prevents execution.
+    Accept code as a compatibility alias, but never guess between conflicting codes.
+    """
+    if not isinstance(data, dict) or data.get('action') not in ('send', 'verify'):
+        raise AccountError('invalid_input', 'input')
+    if 'consent' in data:
+        if data['consent'] is False:
+            raise AccountError('consent_required', 'input')
+        if data['consent'] is not True:
+            raise AccountError('invalid_consent', 'input')
+    phone = data.get('phone')
+    if not isinstance(phone, str) or not re.fullmatch(r'1\d{10}', phone, flags=re.ASCII):
+        raise AccountError('phone_invalid', 'input')
+    normalized = dict(data)
+    if data['action'] == 'verify':
+        if 'smsCode' in data and 'code' in data and data['smsCode'] != data['code']:
+            raise AccountError('code_conflict', 'input')
+        code = data['smsCode'] if 'smsCode' in data else data.get('code')
+        if code is None or code == '':
+            raise AccountError('code_required', 'input')
+        if not isinstance(code, str) or not re.fullmatch(r'[0-9]{6}', code):
+            raise AccountError('code_invalid', 'input')
+        normalized['smsCode'] = code
+        normalized.pop('code', None)
+    return normalized
+
+
+INPUT_ERROR_HINTS = {
+    'invalid_input': '输入必须是 JSON 对象，action 为 send 或 verify。',
+    'consent_required': '调用显式传入 consent=false，本次未执行；不得自动改成 true 后重试。',
+    'invalid_consent': 'consent 可省略；如传入，必须是 JSON 布尔值，不接受字符串、数字或 null。',
+    'phone_invalid': 'phone 必须是用户本轮提供的 11 位手机号字符串，不猜测或补齐号码。',
+    'code_required': 'verify 必须提供 smsCode；兼容别名 code。承接本轮用户已提供的验证码。',
+    'code_invalid': '验证码必须是 6 位 ASCII 数字字符串，保留前导零，不猜测或补齐验证码。',
+    'code_conflict': 'smsCode 与 code 不一致；根据本轮用户输入核对，不自行选取其中一个。',
+}
+
+
 def register(data, api, config=None):
     stage = 'input'
     try:
-        if not isinstance(data, dict) or data.get('action') not in ('send', 'verify'):
-            raise AccountError('invalid_input')
-        if data.get('consent') is not True:
-            raise AccountError('consent_required')
+        data = normalize_register_input(data)
         phone = data.get('phone')
-        if not isinstance(phone, str) or not re.fullmatch(r'1\d{10}', phone, flags=re.ASCII):
-            raise AccountError('phone_invalid')
-        if data['action'] == 'verify' and (not isinstance(data.get('smsCode'), str) or not data['smsCode'].strip()):
-            raise AccountError('code_required')
         if data['action'] == 'send':
             if config is not None:
                 config.preflight(data.get('configVersion'), data.get('replaceConfirmed') is True)
@@ -300,7 +334,10 @@ def register(data, api, config=None):
             return dict(status='sms_sent', phone=phone, expires_in_seconds=600)
         return verify(data, api, config)
     except AccountError as exc:
-        return dict(status=exc.status, stage=exc.stage or stage, configuration_written=False)
+        result = dict(status=exc.status, stage=exc.stage or stage, configuration_written=False)
+        if result['stage'] == 'input' and exc.status in INPUT_ERROR_HINTS:
+            result.update(request_sent=False, agent_instruction=INPUT_ERROR_HINTS[exc.status])
+        return result
 
 
 def verify(data, api, config):

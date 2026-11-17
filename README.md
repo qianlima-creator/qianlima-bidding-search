@@ -3,7 +3,8 @@
 面向支持 Agent Skills（`SKILL.md`）的智能助手，通过自然语言查询招投标信息、发现采购商机、跟进项目进展，并开展招投标视角的企业分析。
 
 **Skill 名称：** `qianlima-bidding-search`  
-**版本：** `v1.0.2`  
+**版本：** `v1.0.3`  
+**功能基准：** 千里马主 Skill `v3.4.6`  
 **账号与 API Key：** [千里马账号平台](https://ai.qianlima.com/?source=b21e4d10ecdea318b517c48a)
 
 ## 功能
@@ -24,9 +25,18 @@
 ### 1. 准备环境
 
 - 支持加载 `SKILL.md` 的智能助手。
-- 有效的千里马 API Key，以及所需的数据访问权限和调用额度。
+- Python 3.10+。普通标讯基础列表支持免注册、免 Key 免费查询。
+- 完整公告、附件、联系方式、采购意向、临期项目及企业情报等深度能力需个人 API Key，以及相应账号权限和积分。
 
-### 2. 获取并配置 API Key
+### 2. 免费开始，按需登录
+
+直接描述地区、时间和业务关键词，即可查询免费基础列表；每组最多查看前 10 页、300 条。免费次数额度与请求频率限制分别按实际响应处理。
+
+需要完整公告、附件或联系方式时，可以在当前会话说“我要登录”，按手机号验证码流程办理；新用户注册可获赠 500 积分。混合需求先交付免费能够满足的部分，再说明未完成的深度内容。
+
+已有个人 Key 默认使用正式查询；主动要求免费时使用免费列表，查看深度信息仍按授权使用积分。明确积分不足且免费能力可满足全部或部分需求时，交付免费结果并说明实际积分状态；不把无效 Key、限频或服务失败当作积分不足。
+
+### 按需获取并配置 API Key
 
 可在会话内按 Skill 的文字引导完成手机号验证码注册／登录。开始前检查当前凭据与宿主可用的配置、加载能力；取得 API Key 后，由宿主 Agent 按配置规则保存、私有读回核对，并加载到查询进程。取得 Key 不等于配置成功，只有保存、读回和加载均完成后才能确认配置成功；实际跨会话复用能力取决于宿主。
 
@@ -137,6 +147,8 @@ cp -R qianlima-bidding-search ~/.codex/skills/
 - [完整 Skill 指令](./qianlima-bidding-search/SKILL.md)
 - [使用案例](./qianlima-bidding-search/references/usage-examples.md)
 - [账号入口与访问限制](./qianlima-bidding-search/references/account-access.md)
+- [游客与免费查询规则](./qianlima-bidding-search/references/guest-access.md)
+- [免费接口说明](./qianlima-bidding-search/references/api-free-search.md)
 - [凭据配置说明](./qianlima-bidding-search/references/credential-configuration.md)
 - [常见问题](./qianlima-bidding-search/references/faq.md)
 - [接口说明](./qianlima-bidding-search/references/api.md)

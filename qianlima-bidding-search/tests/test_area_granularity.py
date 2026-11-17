@@ -18,7 +18,7 @@ class AreaGranularityTests(unittest.TestCase):
     def setUp(self):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
-        env = patch.dict(os.environ, {'QIANLIMA_SKILL_STATE_DIR':tmp.name})
+        env = patch.dict(os.environ, {'QIANLIMA_API_KEY':'offline-regression-key', 'QIANLIMA_SKILL_STATE_DIR':tmp.name})
         env.start()
         self.addCleanup(env.stop)
 
@@ -138,7 +138,7 @@ class AreaGranularityTests(unittest.TestCase):
 
     def test_old_session_can_refine_to_accepted_whole_scope_then_page(self):
         for source, _, _ in self.sources:
-            with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, {'QIANLIMA_SKILL_STATE_DIR':tmp}):
+            with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, {'QIANLIMA_API_KEY':'offline-regression-key', 'QIANLIMA_SKILL_STATE_DIR':tmp}):
                 original = dict(self.query(source,[3320]), excludeWords=['维修'])
                 snap = r.save_search_snapshot(session_id=str(uuid.uuid4()),result_type=source,
                        effective_query=original,viewed_cards=[],total_count=20,page_count=4)

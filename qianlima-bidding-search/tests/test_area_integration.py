@@ -64,7 +64,7 @@ class AreaIntegrationTests(unittest.TestCase):
             client.last_request_path, client.last_request_query = path, dict(query)
             return {'rowCount': 100, 'pageCount': 4, 'list': []}
         for kind, (normalize, query) in zip(['project','purchase_intention','expiring_project'], self.queries()):
-            with self.subTest(kind=kind), tempfile.TemporaryDirectory() as state, patch.dict(os.environ, {'QIANLIMA_SKILL_STATE_DIR':state}):
+            with self.subTest(kind=kind), tempfile.TemporaryDirectory() as state, patch.dict(os.environ, {'QIANLIMA_API_KEY':'offline-regression-key', 'QIANLIMA_SKILL_STATE_DIR':state}):
                 original, _ = normalize(dict(query, areaIds=[2807], excludeWords=['维修']))
                 snap = r.save_search_snapshot(session_id=str(uuid.uuid4()), result_type=kind,
                     effective_query=original, viewed_cards=[], total_count=100, page_count=4)
@@ -87,7 +87,7 @@ class AreaIntegrationTests(unittest.TestCase):
                 self.assertEqual(calls, [dict(original, currentPage=2)])
 
     def test_complex_clear_survives_patch_normalization(self):
-        with tempfile.TemporaryDirectory() as state, patch.dict(os.environ, {'QIANLIMA_SKILL_STATE_DIR':state}):
+        with tempfile.TemporaryDirectory() as state, patch.dict(os.environ, {'QIANLIMA_API_KEY':'offline-regression-key', 'QIANLIMA_SKILL_STATE_DIR':state}):
             query, _ = r.normalize_project_search_query(dict(self.queries()[0][1], areaIds=[2807]))
             snap = r.save_search_snapshot(session_id=str(uuid.uuid4()), result_type='project',
                 effective_query=query, viewed_cards=[], total_count=0, page_count=0)

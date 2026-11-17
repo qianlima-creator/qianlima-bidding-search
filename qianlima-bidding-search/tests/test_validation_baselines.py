@@ -38,6 +38,7 @@ def load_module(path: Path, name: str) -> Any:
 class ValidationBaselineTests(unittest.TestCase):
     def follow_up_payload(self, fixtures: Path, state_dir: Path, *args: str) -> dict[str, Any]:
         env = {key: value for key, value in os.environ.items() if not key.startswith("QIANLIMA_")}
+        env["QIANLIMA_API_KEY"] = "offline-baseline-key"
         env["QIANLIMA_SKILL_STATE_DIR"] = str(state_dir)
         proc = subprocess.run(
             [sys.executable, str(RUNTIME), "--mock-dir", str(fixtures), *args],
@@ -123,7 +124,7 @@ class ValidationBaselineTests(unittest.TestCase):
 
     def run_skill(self, command: str, query: dict[str, Any], *extra: str) -> dict[str, Any]:
         with tempfile.TemporaryDirectory() as tmp:
-            env = os.environ.copy()
+            env = dict(os.environ, QIANLIMA_API_KEY="offline-baseline-key")
             env["QIANLIMA_SKILL_STATE_DIR"] = str(Path(tmp) / "state")
             env.pop("QIANLIMA_SKILL_STATE", None)
             proc = subprocess.run(

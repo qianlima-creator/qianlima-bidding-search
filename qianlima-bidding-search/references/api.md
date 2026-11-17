@@ -2,17 +2,22 @@
 
 ## 认证与事实
 
-默认生产地址 `https://skills.qianlima.com`，可通过既有 `QIANLIMA_BASE_URL` 配置。认证请求头是 `qianlimaApiKey`，每次值来自当前 `QIANLIMA_API_KEY`；JSON 请求使用 `Content-Type: application/json`。Key 只放在本次初始接口请求头，HTTP 重定向不转发。查询状态不选择或替换凭据；换 Key 不使原查询失效，由当前业务 API 最终鉴权。不自创认证头，不打印、记录或回显密钥，不写入快照。
+默认生产地址 `https://skills.qianlima.com`，可通过既有 `QIANLIMA_BASE_URL` 配置。正式查询认证请求头是 `qianlimaApiKey`，每次值来自当前 `QIANLIMA_API_KEY`；JSON 请求使用 `Content-Type: application/json`。Key 只放在本次初始接口请求头，HTTP 重定向不转发。查询状态不选择或替换凭据；换 Key 不使原查询失效，由当前业务 API 最终鉴权。不自创认证头，不打印、记录或回显密钥，不写入快照。
 
-真实联调前 `GET /api/user/verify` 确认账号与 Skill 权限；成功 data 的 `username` 仅供账号核对，不主动展示。此验证不是普通每次搜索的额外前置请求。
+正式账号能力真实联调前 `GET /api/user/verify` 确认账号与 Skill 权限；成功 data 的 `username` 仅供账号核对，不主动展示。此验证不是普通每次搜索的额外前置请求，也不作为匿名免费查询的前置。免费接口约定见下节。
 
 查询 API 通用外层是 `code/msg/data/success`，以 code 200 判断业务成功，其他业务码按 API 返回处理。Skill 不按 data 的字段、类型、空值或对象编号再次判断成败。字段为空或 null 表示信息未公示，0 和 false 保留原意。
+
+## 免费接口
+
+免费普通标讯的请求、响应和错误处理见[免费搜索接口](api-free-search.md)，身份选路、费用意愿及任务衔接见[游客规则](guest-access.md)。匿名免费查询不以账号校验为前置；有 Key 免费查询不因携带 Key 自动变成积分查询。免费接口错误不能直接套用正式接口的全部错误码，不因错误自动改用收费接口。
 
 ## 按能力读取
 
 | 能力 | 参考 |
 | --- | --- |
-| 项目搜索、详情 | [普通项目](api-projects.md) |
+| 免费普通标讯搜索 | [免费搜索协议](api-free-search.md)、[游客行为](guest-access.md) |
+| 正式项目搜索、详情 | [普通项目](api-projects.md) |
 | 正文、附件、时间线、来源链接 | [项目资源](api-project-resources.md) |
 | 采购意向搜索、详情 | [采购意向](api-purchase-intentions.md) |
 | 临期项目搜索、详情 | [临期项目](api-expiring-projects.md) |
@@ -83,6 +88,13 @@
 
 ## 完整查询上下文
 
+普通标讯恢复时，除 `result_type`、完整 `effective_query` 及精确分页外，保留已知的 `total_count`（用于识别不足整页的末页）及最近 `follow_up` 中的 `access_mode`（guest/authenticated）、`access_mode_source`（default/explicit）、`viewable_page_count`、`max_viewable_rows`、`delivered_position`、`seen_ids` 和 `pending_cards`。这些是上下文元数据，不能放入 API 查询体。`--access-mode` 显式选择优先于历史模式；default 表示自动选路，登录后可转正式，explicit 才是列表的主动选择。
+
+`delivered_position` 是同条件结果序列已处理到的位置（从 0 起），`seen_ids` 为已交付公告 ID，`pending_cards` 为已取得但尚未交付的顺序记录。脚本返回整页时视为整页已交付；Agent 只展示部分时，下一次用 `--context-json` 传入调整后的实际位置、已展示 ID 和剩余卡片，不能使用未调整的结果引用跳过剩余内容。待展示记录优先从缓存交付，切免费时限制字段；缓存不是新接口权限或最新详情的证明。没有可靠进度时不猜、不重新播放历史页。
+
+免费 `page_count` 是真实总页数，续查受 `viewable_page_count` 与 `max_viewable_rows` 限制。免费模式或分页异常会输出 `protocol_issues`、`continuation_blocked=true`，不生成可续查状态；原业务成功与原始响应仍保留。`link_notice` 为实际返回的免费列表公告详情入口的积分提示，官网入口不提示点击扣费，`access_facts` 为费用和限制事实；会话提示去重、接入意愿及授权由 Agent 按[游客规则](guest-access.md)处理。
+
+
 `next/refine/search-company --next` 可用 `--context-json` 恢复明确原查询。`result_type` 必须已知；`effective_query` 完整复制上一轮成功输出，保留所有有效条件、准确 `currentPage` 和页大小，不使用原始简略输入或补猜默认。项目页大小是 `numPerPage`，公司是 `pageSize`，并保留 `companyName`。已知 `page_count` 可附带；0 或已到末页不多调，未知总页数但当前页准确可继续。
 
 原结果集仍可用时最短调用如下，可省略或更换会话：
@@ -92,18 +104,15 @@ python3 scripts/qianlima_skill.py next --result-set-id RESULT
 python3 scripts/qianlima_skill.py refine --result-set-id RESULT --query-json '{"hasAnnex":0}'
 ```
 
-例如原成功输出的全部有效条件如下：
+例如原免费查询已完整交付第 1 页的 30 条记录，完整上下文需复制实际输出，而不是只摘取筛选条件：
 
 ```json
-{"result_type":"project","effective_query":{"keywordGroups":[{"keywords":["物业"],"matchScopes":[2,9]}],"beginTime":"2026-09-01 00:00:00","endTime":"2026-09-30 23:59:59","currentPage":1,"numPerPage":10},"page_count":3}
+{"result_type":"project","effective_query":{"keywordGroups":[{"keywords":["物业"],"matchScopes":[2,9]}],"beginTime":"2026-11-01 00:00:00","endTime":"2026-11-15 23:59:59","currentPage":1,"numPerPage":30},"page_count":20,"total_count":600,"access_mode":"guest","access_mode_source":"explicit","viewable_page_count":10,"max_viewable_rows":300,"delivered_position":30,"seen_ids":["example-1","example-2","example-3","example-4","example-5","example-6","example-7","example-8","example-9","example-10","example-11","example-12","example-13","example-14","example-15","example-16","example-17","example-18","example-19","example-20","example-21","example-22","example-23","example-24","example-25","example-26","example-27","example-28","example-29","example-30"],"pending_cards":[]}
 ```
 
-```bash
-python3 scripts/qianlima_skill.py next --context-json '{"result_type":"project","effective_query":{"keywordGroups":[{"keywords":["物业"],"matchScopes":[2,9]}],"beginTime":"2026-09-01 00:00:00","endTime":"2026-09-30 23:59:59","currentPage":1,"numPerPage":10},"page_count":3}'
-python3 scripts/qianlima_skill.py refine --context-json '{"result_type":"project","effective_query":{"keywordGroups":[{"keywords":["物业"],"matchScopes":[2,9]}],"beginTime":"2026-09-01 00:00:00","endTime":"2026-09-30 23:59:59","currentPage":1,"numPerPage":10}}' --query-json '{"hasAnnex":0}'
-```
+示例 ID 为结构占位，实际调用用真实已交付 ID；全部 `effective_query` 字段及状态值复制原成功输出。将完整对象作为 `--context-json` 的值传给 `next`；`refine` 传同一对象并加 `--query-json` 的变化字段。只有原页已全部交付且没有待展示缓存时，同页大小下一页才直接加 1。部分展示时，例如只交付前 10 条，位置为 10、`seen_ids` 为这 10 条 ID、`pending_cards` 为剩余 20 条原始卡片（保留 URL）；下次先交付缓存，不跳页。
 
-下一页只将原页码加 1，细化只改 patch 并回第一页。采购意向/临期保留自身全部有效条件，例如：
+细化只改 patch 并回第一页。跨模式按实际交付位置换算，见[游客规则](guest-access.md#分页限制与续查)，不能沿用不同页大小的页码。采购意向/临期保留自身全部有效条件，例如：
 
 ```json
 {"result_type":"purchase_intention","effective_query":{"keywords":["物业"],"startPlanPurchaseDate":"2026-11","endPlanPurchaseDate":"2027-01","currentPage":1,"numPerPage":10}}
@@ -137,9 +146,22 @@ python3 scripts/qianlima_skill.py refine --context-json '{"result_type":"project
 
 `python3 scripts/qianlima_account.py prepare` 在本地取得唯一引导文案，不发起网络请求；无查询任务加 `--no-query`。`--has-key` 仅在执行侧已确认有 Key 时使用。只有用户明确要求换号或换 Key 才进入更换流程；首次配置不询问替换，不增加网页探测。
 
-`python3 scripts/qianlima_account.py register --input-stdin` 从 stdin 接收 JSON。发码仅需 `action=send`、`phone`、`consent=true`，不要求、不比对协议版本，也不重新请求协议接口；后端发码请求仅包含 `phone`。验证登录仅需 `action=verify`、`phone`、`smsCode`、`consent=true`。脚本在提交登录前自动获取后端必填的 `agreementVersion` 和 `privacyVersion`，与固定来源码一起填入登录请求；Agent 无需记忆或传回版本，旧调用额外传入的版本字段不参与组装。prepare 不获取版本，verify 不比较版本、不重复获取或自动重试。版本接口失败或返回无效版本时以 `stage=legal` 停止，尚未提交验证码，不登录、不取 Key、不写配置、不重发短信；不得让用户补版本或误报验证码错误。默认无需 `--credential-fd` 或管道。发码成功回执为 `status=sms_sent`、本次提交的完整 `phone` 和 `expires_in_seconds`，不再返回 `phone_masked`；号码可在本次登录对话中原样展示。`consent=true` 根据用户本轮明确的发码／登录操作请求设置，不表示已阅读或同意法律协议；不为此追加协议确认。手机号和验证码不写命令行参数。send 与 verify 显式分开，不隐式重发；登录失败按接口实际结果反馈，不将本地参数缺失解释为协议变化。
+`python3 scripts/qianlima_account.py register --input-stdin` 从 stdin 接收 JSON。发码仅需 `action=send`、`phone`，不要求、不比对协议版本，也不重新请求协议接口；后端发码请求仅包含 `phone`。验证登录仅需 `action=verify`、`phone`、`smsCode`。验证码必须是六位 ASCII 数字字符串，保留前导零；兼容 `code` 别名，由脚本统一转换为后端的 `smsCode`。两个字段同时传入且不一致时返回 `code_conflict`，不自行选取。脚本在提交登录前自动获取后端必填的 `agreementVersion` 和 `privacyVersion`，与固定来源码一起填入登录请求；Agent 无需记忆或传回版本，旧调用额外传入的版本字段不参与组装。prepare 不获取版本，verify 不比较版本、不重复获取或自动重试。版本接口失败或返回无效版本时以 `stage=legal` 停止，尚未提交验证码，不登录、不取 Key、不写配置、不重发短信；不得让用户补版本或误报验证码错误。默认无需 `--credential-fd` 或管道。发码成功回执为 `status=sms_sent`、本次提交的完整 `phone` 和 `expires_in_seconds`，不再返回 `phone_masked`；号码可在本次登录对话中原样展示。`consent` 为可选兼容字段：省略或传 JSON 布尔值 `true` 均可；显式传 `false` 返回 `consent_required` 并停止，不自动改为 `true` 重试；字符串、数字或 `null` 返回 `invalid_consent`。Agent 仍须依据本轮用户明确的发码／登录请求执行，用户取消或仅引用历史／示例号码时不调用脚本；该字段不表示已阅读或同意法律协议，不为此追加协议确认。手机号和验证码不写命令行参数。send 与 verify 显式分开，不隐式重发；登录失败按接口实际结果反馈，不将本地参数缺失解释为协议变化。
 
-登录请求的 `sourceCode` 由本主包固定为 `b21e4d10ecdea318b517c48a`，与网站入口的 `source` 相同。无需用户提供，stdin 中的来源字段不能覆盖包内值。仅登录请求带此字段，不写入发码、协议、余额、退出或查询参数；不为来源额外请求或自动重试。不能仅凭客户端传参就宣称后台归因成功；老用户不要求来源回填。
+
+推荐输入结构（通过 stdin 提交；示例值只用于说明，不触发真实请求）：
+
+```json
+{"action":"send","phone":"13800000000"}
+```
+
+```json
+{"action":"verify","phone":"13800000000","smsCode":"012345"}
+```
+
+输入校验失败时，结果包含 `stage=input`、`request_sent=false` 和 `agent_instruction`，表示本次尚未请求账号接口。参数遗漏或别名冲突由 Agent 根据本轮已提供内容修正，不误报为后端验证码错误、不重发短信；用户输入确有缺失或歧义时才澄清。该标记只适用于当前调用，不能推断此前调用未发生。
+
+登录请求的 `sourceCode` 由本主包固定为 `b21e4d10ecdea318b517c48a`，与网站入口的 `source` 相同。无需用户提供，stdin 中的来源字段不能覆盖包内值。账号流程中仅登录请求带此字段，不写入发码、协议、余额或退出请求；免费搜索的同名来源字段由查询脚本按[免费接口](api-free-search.md#来源传递)独立注入，不放入用户查询参数；不为来源额外请求或自动重试。不能仅凭客户端传参就宣称后台归因成功；老用户不要求来源回填。
 
 默认验证成功返回 `status=credential_available`、完整 `api_key`、`login_completed=true`、`configuration_written=false`、`current_environment_loaded=false`，另返回本次提交的完整手机号 `phone`、新老用户标识、实际余额和退出状态。Agent 在已获保存授权及替换条件满足时立即按用户提供 Key 的同一规则配置；不要等待用户重发 Key 或配置指令。取得 Key 和脚本退出码 0 均不表示已保存或加载。
 

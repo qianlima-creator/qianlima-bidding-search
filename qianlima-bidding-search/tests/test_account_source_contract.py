@@ -20,7 +20,7 @@ class SourceContractTests(unittest.TestCase):
         for new in (True, False):
             with self.subTest(new=new):
                 api = LoginAPI(new=new)
-                data = inputs(action='verify', smsCode='1234', configVersion='fake-v')
+                data = inputs(action='verify', smsCode='012345', configVersion='fake-v')
                 result = account.register(data, api, FakeConfig())
                 self.assertEqual(result['status'], 'configuration_saved')
                 logins = [c for c in api.calls if c[1] == '/api/auth/login']
@@ -41,7 +41,7 @@ class SourceContractTests(unittest.TestCase):
 
     def test_stdin_cannot_override_package_source_and_guidance_matches(self):
         api = LoginAPI()
-        data = inputs(action='verify', smsCode='1234', configVersion='fake-v',
+        data = inputs(action='verify', smsCode='012345', configVersion='fake-v',
                       source='external-page', sourceCode='other-package')
         with patch.object(account, 'AccountAPI', return_value=api), \
              patch.object(account, 'CodexConfig') as config, \
@@ -101,7 +101,8 @@ class SourceContractTests(unittest.TestCase):
         links = re.findall(r'\[([^\]]+)\]\((https://ai\.qianlima\.com/[^)]*)\)', text)
         self.assertEqual(len(links), 1)
         label, url = links[0]
-        self.assertEqual(label, url)
+        # Account-access allows a Chinese site name; the complete target and source remain mandatory.
+        self.assertTrue(label.strip())
         urls = [url]
         self.assertEqual(len(urls), 1)
         self.assertEqual(parse_qs(urlsplit(urls[0]).query), {'source': [SOURCE]})
@@ -118,7 +119,7 @@ class SourceContractTests(unittest.TestCase):
     def test_login_failure_keeps_source_without_retry_or_write(self):
         api, config = LoginAPI(), FakeConfig()
         api.fail['/api/auth/login'] = account.AccountError('request_failed')
-        result = account.register(inputs(action='verify', smsCode='1234'), api, config)
+        result = account.register(inputs(action='verify', smsCode='012345'), api, config)
         self.assertEqual(result['status'], 'request_failed')
         self.assertEqual(config.writes, 0)
         self.assertEqual(len(api.calls), 3)

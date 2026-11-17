@@ -79,7 +79,7 @@ class LoginTests(unittest.TestCase):
     def run_flow(self, api=None, config=None):
         api = api or LoginAPI()
         config = config or FakeConfig()
-        return account.register(inputs(action='verify', smsCode='1234', configVersion='fake-v',
+        return account.register(inputs(action='verify', smsCode='012345', configVersion='fake-v',
                                        replaceConfirmed=True), api, config)
 
     def test_new_and_existing_reveal_and_zero_balance(self):
@@ -96,7 +96,7 @@ class LoginTests(unittest.TestCase):
                 self.assertEqual('/api/api-keys/7/reveal' in paths, not new)
                 self.assertLess(paths.index('/api/points/account'), paths.index('/api/auth/logout'))
                 self.assertEqual(paths[-1], '/api/auth/logout')
-                for secret in [api.secret, api.token, '1234']:
+                for secret in [api.secret, api.token, '012345']:
                     self.assertNotIn(secret, json.dumps(result))
 
     def test_balance_failure_or_missing_never_invents_balance(self):
@@ -189,12 +189,12 @@ class LoginTests(unittest.TestCase):
         config.close = lambda: None
         with patch.object(account, 'CodexConfig', return_value=config), patch.object(account, 'AccountAPI', return_value=api), \
              patch.object(sys, 'argv', ['qianlima_account.py', 'register', '--input-stdin']), \
-             patch.object(sys, 'stdin', io.StringIO(json.dumps(inputs(action='verify', smsCode='1234')))), \
+             patch.object(sys, 'stdin', io.StringIO(json.dumps(inputs(action='verify', smsCode='012345')))), \
              patch.object(sys, 'stdout', io.StringIO()) as output:
             self.assertEqual(account.main(config_factory=account.CodexConfig), 0)
         result = json.loads(output.getvalue())
         self.assertEqual(result['status'], 'configuration_saved')
-        for secret in [api.secret, api.token, '1234']:
+        for secret in [api.secret, api.token, '012345']:
             self.assertNotIn(secret, output.getvalue())
 
     def test_missing_or_invalid_default_key_id_stops_before_reveal(self):
@@ -310,12 +310,12 @@ class LoginTests(unittest.TestCase):
              patch.object(account, 'CodexConfig', return_value=config), \
              patch.object(account, 'AccountAPI', return_value=api), \
              patch.object(sys, 'argv', ['account', 'register', '--input-stdin']), \
-             patch.object(sys, 'stdin', io.StringIO(json.dumps(inputs(action='verify', smsCode='1234')))), \
+             patch.object(sys, 'stdin', io.StringIO(json.dumps(inputs(action='verify', smsCode='012345')))), \
              patch.object(sys, 'stdout', output), patch.object(sys, 'stderr', errors):
             self.assertEqual(account.main(config_factory=account.CodexConfig), 0)
         self.assertEqual(json.loads(output.getvalue())['status'], 'configuration_saved')
         self.assertEqual(errors.getvalue(), '')
-        for secret in (marker, api.secret, api.token, '1234'):
+        for secret in (marker, api.secret, api.token, '012345'):
             self.assertNotIn(secret, output.getvalue())
         self.assertNotIn('api_responses', json.loads(output.getvalue()))
 
@@ -393,7 +393,7 @@ class TransportTests(unittest.TestCase):
                     return io.BytesIO(json.dumps(result).encode())
                 config = FakeConfig()
                 with patch.object(account.request.OpenerDirector, 'open', respond):
-                    result = account.register(inputs(action='verify', smsCode='1234'),
+                    result = account.register(inputs(action='verify', smsCode='012345'),
                                               account.AccountAPI(), config)
                 self.assertEqual(result['status'], status)
                 self.assertEqual(result['stage'], 'login')
@@ -422,7 +422,7 @@ class TransportTests(unittest.TestCase):
                                         api.token if needs_token else None)
                     return io.BytesIO(json.dumps({'code': 0, 'data': value}).encode())
                 with patch.object(account.request.OpenerDirector, 'open', respond):
-                    result = account.register(inputs(action='verify', smsCode='1234'),
+                    result = account.register(inputs(action='verify', smsCode='012345'),
                                               account.AccountAPI(), config)
                 self.assertEqual(result['status'], 'configuration_saved')
                 self.assertEqual(seen, ['/api/legal?type=TERMS', '/api/legal?type=PRIVACY', '/api/auth/login'] + ([] if new else ['/api/api-keys/7/reveal']) +
@@ -548,7 +548,7 @@ class NativeCodexTests(unittest.TestCase):
             current, key = snapshot()
             return current, 'synthetic-other-key' if self.config.written is True else key
         with patch.object(self.config, 'snapshot', side_effect=mismatched_readback):
-            result = account.register(inputs(action='verify', smsCode='1234', configVersion=version),
+            result = account.register(inputs(action='verify', smsCode='012345', configVersion=version),
                                       api, self.config)
         self.assertEqual(result['status'], 'configuration_written_not_loaded')
         self.assertTrue(result['configuration_written'])
@@ -562,7 +562,7 @@ class NativeCodexTests(unittest.TestCase):
         root = Path(__file__).resolve().parents[1]
         api = LoginAPI(False, 0)
         api.secret = self.key
-        result = account.register(inputs(action='verify', smsCode='1234',
+        result = account.register(inputs(action='verify', smsCode='012345',
             configVersion=self.config.metadata()['configVersion']), api, self.config)
         self.assertEqual(result['status'], 'configuration_saved')
         received = []
@@ -650,7 +650,7 @@ class SendTests(unittest.TestCase):
 
     def test_login_uses_script_versions_instead_of_legacy_inputs(self):
         api = LoginAPI()
-        result = account.register(inputs(action='verify', smsCode='1234',
+        result = account.register(inputs(action='verify', smsCode='012345',
                                           agreementVersion='old-terms', privacyVersion='old-privacy'), api)
         self.assertEqual(result['status'], 'credential_available')
         login = next(c for c in api.calls if c[1] == '/api/auth/login')
@@ -680,7 +680,7 @@ class SendTests(unittest.TestCase):
         for kind in ('TERMS', 'PRIVACY'):
             api, config = LoginAPI(), FakeConfig()
             api.fail[f'/api/legal?type={kind}'] = account.AccountError('request_failed')
-            result = account.register(inputs(action='verify', smsCode='1234'), api, config)
+            result = account.register(inputs(action='verify', smsCode='012345'), api, config)
             self.assertEqual(result['status'], 'request_failed')
             self.assertEqual(result['stage'], 'legal')
             self.assertFalse(any(c[0] == 'POST' for c in api.calls))
@@ -705,6 +705,47 @@ class SendTests(unittest.TestCase):
 
 
 class InputContractTests(unittest.TestCase):
+    def test_optional_consent_and_code_alias_reach_backend_unchanged(self):
+        for consent in ({}, {'consent': True}):
+            for code in ({'smsCode': '012345'}, {'code': '012345'},
+                         {'smsCode': '012345', 'code': '012345'}):
+                with self.subTest(consent=consent, code=code):
+                    api = LoginAPI()
+                    data = dict(action='verify', phone='19900000001', **code, **consent)
+                    original = dict(data)
+                    result = account.register(data, api)
+                    self.assertEqual(result['status'], 'credential_available')
+                    login = next(c[2] for c in api.calls if c[1] == '/api/auth/login')
+                    self.assertEqual(login['smsCode'], '012345')
+                    self.assertNotIn('code', login)
+                    self.assertNotIn('consent', login)
+                    self.assertEqual(data, original)
+                    self.assertFalse(any(c[1] == '/api/auth/sms/send' for c in api.calls))
+        api = FakeAPI()
+        result = account.register(dict(action='send', phone='19900000001'), api)
+        self.assertEqual(result['status'], 'sms_sent')
+        self.assertEqual(api.calls, [('POST', '/api/auth/sms/send', {'phone': '19900000001'}, None)])
+
+    def test_input_errors_stop_before_api_and_configuration(self):
+        cases = [({'smsCode': '012345', 'code': '654321'}, 'code_conflict'),
+                 ({'code': 12345}, 'code_invalid'),
+                 ({'code': '１２３４５６'}, 'code_invalid'),
+                 ({'code': ''}, 'code_required'),
+                 ({'code': '012345', 'consent': False}, 'consent_required'),
+                 ({'code': '012345', 'consent': 'true'}, 'invalid_consent')]
+        for fields, status in cases:
+            with self.subTest(fields=fields):
+                api, config = LoginAPI(), FakeConfig()
+                with patch.object(config, 'preflight') as preflight:
+                    result = account.register(dict(action='verify', phone='19900000001', **fields), api, config)
+                    preflight.assert_not_called()
+                self.assertEqual(result['status'], status)
+                self.assertEqual(result['stage'], 'input')
+                self.assertIs(result['request_sent'], False)
+                self.assertTrue(result['agent_instruction'])
+                self.assertEqual(api.calls, [])
+                self.assertEqual(config.writes, 0)
+
     class Config(FakeConfig):
         def snapshot(self):
             return 'fake-v', None
@@ -731,11 +772,11 @@ class InputContractTests(unittest.TestCase):
         self.assertEqual(config.value, 'old-test-value')
         self.assertFalse(any(c[0] == 'POST' for c in api.calls))
         self.assertNotIn('19900000001', output.getvalue())
-        self.assertNotIn('1234', output.getvalue())
+        self.assertNotIn('012345', output.getvalue())
         return json.loads(output.getvalue()), api.calls
 
     def test_cli_required_fields_missing_for_send_and_verify(self):
-        expected = {'action': 'invalid_input', 'consent': 'consent_required',
+        expected = {'action': 'invalid_input',
                     'phone': 'phone_invalid', 'smsCode': 'code_required',
                     'configVersion': 'configuration_changed'}
         for action in ('send', 'verify'):
@@ -743,7 +784,7 @@ class InputContractTests(unittest.TestCase):
                 if action == 'send' and field == 'smsCode':
                     continue
                 with self.subTest(action=action, missing=field):
-                    data = inputs(action=action, smsCode='1234', configVersion='fake-v')
+                    data = inputs(action=action, smsCode='012345', configVersion='fake-v')
                     data.pop(field)
                     result, calls = self.invoke(data)
                     self.assertEqual(result['status'], status)
@@ -752,11 +793,12 @@ class InputContractTests(unittest.TestCase):
     def test_cli_wrong_phone_code_and_consent_types(self):
         for field, values, expected in (
             ('phone', [None, 19900000001, True, [], {}, '', '１２３４５６７８９０１'], 'phone_invalid'),
-            ('smsCode', [None, 1234, True, [], {}, '', '   '], 'code_required'),
-            ('consent', [None, 1, 'true'], 'consent_required')):
+            ('smsCode', [None, ''], 'code_required'),
+            ('smsCode', [1234, True, [], {}, '   ', '1234', '1234567', '１２３４５６', '١٢٣٤٥٦'], 'code_invalid'),
+            ('consent', [None, 0, 1, 'true', [], {}], 'invalid_consent')):
             for value in values:
                 with self.subTest(field=field, value=value):
-                    data = inputs(action='verify', smsCode='1234', configVersion='fake-v')
+                    data = inputs(action='verify', smsCode='012345', configVersion='fake-v')
                     data[field] = value
                     result, calls = self.invoke(data)
                     self.assertEqual(result['status'], expected)
@@ -771,7 +813,7 @@ class InputContractTests(unittest.TestCase):
             for value in (None, 1, True, [], {}, '', '   ', 'stale-version'):
                 with self.subTest(field=field, value=value):
                     api = LoginAPI()
-                    data = inputs(action='verify', smsCode='1234')
+                    data = inputs(action='verify', smsCode='012345')
                     data[field] = value
                     result = account.register(data, api)
                     self.assertEqual(result['status'], 'credential_available')
@@ -789,7 +831,7 @@ class InputContractTests(unittest.TestCase):
                         value = original(method, path, body, token)
                         return response if path == '/api/legal?type=' + kind else value
                     with patch.object(api, 'request', side_effect=request):
-                        result = account.register(inputs(action='verify', smsCode='1234'), api)
+                        result = account.register(inputs(action='verify', smsCode='012345'), api)
                     self.assertEqual(result['status'], 'agreement_unavailable')
                     self.assertEqual(result['stage'], 'legal')
                     self.assertFalse(any(c[0] == 'POST' for c in api.calls))

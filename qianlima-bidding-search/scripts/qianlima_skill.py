@@ -40,6 +40,7 @@ from complex_query_plan import (
 
 
 DEFAULT_BASE_URL = "https://skills.qianlima.com"
+PACKAGE_SOURCE_CODE = "b21e4d10ecdea318b517c48a"
 STATE_VERSION = 3
 DEFAULT_STATE_TTL_SECONDS = 7200
 STATE_ERROR_CODES = {
@@ -806,8 +807,12 @@ def follow_up_metadata(snapshot: dict[str, Any]) -> dict[str, Any] | None:
         "result_set_id": snapshot["result_set_id"],
         "parent_result_set_id": snapshot.get("parent_result_set_id"),
         "expires_at": snapshot["expires_at"],
+        "total_count": snapshot.get("total_count"),
         "allowed_actions": (["search-company --next"] if snapshot.get("result_type") == "company_candidates" else ["detail","full-text","attachments","timeline"] if snapshot.get("origin") == "timeline" else ["detail","next","refine","full-text","attachments","timeline"] if snapshot.get("result_type") == "project" else ["detail","next","refine"]),
     }
+    for field in ("access_mode", "access_mode_source", "viewable_page_count", "max_viewable_rows", "delivered_position", "seen_ids", "pending_cards"):
+        if field in snapshot:
+            metadata[field] = snapshot[field]
     if usable_count(snapshot.get("page_count")) is None:
         metadata["limitation"] = "总页数未公示，下一页按已执行页码继续。"
     query = snapshot.get("effective_query") or {}
@@ -817,6 +822,10 @@ def follow_up_metadata(snapshot: dict[str, Any]) -> dict[str, Any] | None:
         except SkillError:
             metadata["allowed_actions"] = [action for action in metadata["allowed_actions"] if action not in {"next", "refine", "search-company --next"}]
             metadata["limitation"] = "查询分页信息不足或超限，不能自动续查；已定位公告仍可读取。"
+    notice = free_continuation_notice(snapshot)
+    if notice:
+        metadata["allowed_actions"] = [action for action in metadata["allowed_actions"] if action != "next"]
+        metadata["limitation"] = notice
     if snapshot_is_expired(snapshot):
         metadata["allowed_actions"] = [action for action in metadata["allowed_actions"] if action not in {"next", "refine", "search-company --next"}]
         metadata["limitation"] = "查询状态已过期；仍可按完整名单定位公告读取。"
@@ -845,6 +854,7 @@ def save_search_snapshot(
     total_count: int,
     page_count: int,
     parent_result_set_id: str | None = None,
+    access_state: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     result_set_id = str(uuid.uuid4())
     timestamp = now_iso()
@@ -863,6 +873,7 @@ def save_search_snapshot(
         "page_count": page_count,
         "focus_project": None,
     }
+    snapshot.update(access_state or {})
     save_json(snapshot_path(session_id, result_set_id), snapshot)
     return snapshot
 
@@ -1544,6 +1555,33 @@ def numbered_card_lines(index: int, title: Any, fields: list[tuple[str, Any]]) -
     return lines
 
 
+def is_account_home_link(value: Any) -> bool:
+    if not isinstance(value, str):
+        return False
+    try:
+        parsed = urllib.parse.urlsplit(value)
+    except ValueError:
+        return False
+    return (parsed.scheme in {"http", "https"}
+            and parsed.hostname in {"ai.qianlima.com", "ai.atest.qianlima.com"}
+            and parsed.path in {"", "/"})
+
+
+def attach_free_link_facts(payload: dict[str, Any], cards: list[dict[str, Any]], *, has_key: bool) -> None:
+    urls = [card.get("url") for card in cards if isinstance(card, dict) and isinstance(card.get("url"), str) and card.get("url")]
+    homes = [url for url in urls if is_account_home_link(url)]
+    issues = []
+    if any(urllib.parse.parse_qs(urllib.parse.urlsplit(url).query).get("source") != [PACKAGE_SOURCE_CODE] for url in homes):
+        issues.append("官网入口缺少或不符合约定的 source 参数")
+    if not has_key and len(homes) != len(urls):
+        issues.append("匿名免费响应的链接不是约定的官网入口")
+    if issues:
+        payload["link_contract_issues"] = issues
+        payload["link_instruction"] = "公告名称附上实际返回的原始URL，官网入口不称公告详情或原文，不提示点击官网扣费；保留原始响应，不自行构造详情凭证。接入引导仍使用文档规定的完整账号链接。"
+    if has_key and len(urls) > len(homes):
+        payload["link_notice"] = "点击查看公告详情会消耗账号积分。"
+
+
 def user_card_list(cards: list[dict[str, Any]]) -> list[str]:
     if not cards:
         return ["这一批没有更多项目。"]
@@ -1561,8 +1599,13 @@ def user_card_list(cards: list[dict[str, Any]]) -> list[str]:
             fields.append(("中标金额（万元）", format_amount_wan(card.get("biddingAmount"))))
         if clean_user_value(card.get("winningBidderUnit")) != EMPTY_DISPLAY:
             fields.append(("中标单位", card.get("winningBidderUnit")))
-        fields.append(("详情", format_detail_link(card.get("url"))))
-        lines.extend(numbered_card_lines(index, card.get("title"), fields))
+        title = clean_user_value(card.get("title"))
+        url = card.get("url")
+        if isinstance(url, str) and url.startswith(("https://", "http://")):
+            label = title.replace("\\", "\\\\").replace("[", "\\[").replace("]", "\\]")
+            destination = f"<{url}>" if "(" in url or ")" in url else url
+            title = f"[{label}]({destination})"
+        lines.extend(numbered_card_lines(index, title, fields))
     return lines
 
 
@@ -1934,11 +1977,11 @@ def first_search_empty_lines(effective_query: dict[str, Any], reflections: list[
     return lines
 
 
-def followup_lines(effective_query: dict[str, Any], total_count: int, returned_count: int, cards: list[dict[str, Any]]) -> list[str]:
+def followup_lines(effective_query: dict[str, Any], total_count: int, returned_count: int, cards: list[dict[str, Any]], *, allow_next: bool = True) -> list[str]:
     if not cards:
         return []
     suggestions: list[str] = []
-    if total_count > returned_count:
+    if allow_next and total_count > returned_count:
         suggestions.append("继续看下一批")
 
     detail_index = 2 if returned_count >= 2 else 1
@@ -1990,6 +2033,7 @@ def user_search_message(
     failure: bool = False,
     include_query_conditions: bool = True,
     zero_reflections: list[str] | None = None,
+    continuation_notice: str | None = None,
 ) -> str:
     lines: list[str] = []
     if next_page:
@@ -2014,12 +2058,14 @@ def user_search_message(
                 lines.append("")
             lines.extend(user_card_list(card_values))
             if not next_page:
-                followups = followup_lines(effective_query, total_count, returned_count, card_values)
+                followups = followup_lines(effective_query, total_count, returned_count, card_values, allow_next=not continuation_notice)
                 if followups:
                     lines.append("")
                     lines.extend(followups)
     else:
         lines.append("我没有自动改用其他网站或搜索引擎补结果。")
+    if continuation_notice:
+        lines.extend(["", continuation_notice])
     warning_values = warnings or []
     if warning_values:
         lines.append("")
@@ -2282,7 +2328,7 @@ def maybe_attach_entitlement_diagnosis(
     *,
     target_right: str,
 ) -> dict[str, Any]:
-    if not should_diagnose_entitlement(error):
+    if getattr(client, "access_mode", None) == "guest" or not should_diagnose_entitlement(error):
         return payload
     trigger = "access_block"
     return attach_entitlement_diagnosis(payload, client, target_right=target_right, trigger=trigger)
@@ -2387,6 +2433,8 @@ def public_error_summary(error: SkillError, command: str | None = None) -> str:
 
 
 def permission_user_message(error: SkillError, command: str | None = None) -> str:
+    if error.code == "MISSING_API_KEY":
+        return "当前查询进程没有 Key，请先检查已有配置的加载。确实无 Key 时，该能力需要登录并使用账号积分；愿意接入后可继续原任务。[前往官网](https://ai.qianlima.com/?source=b21e4d10ecdea318b517c48a)"
     return render_user_error_from_rule(auth_error_rule(error, command))
 
 
@@ -2575,11 +2623,13 @@ def validate_endpoint_request(method: str, path: str, query: dict[str, Any] | No
     if path in {"/api/user/verify", "/api/user/entitlement"}:
         expected_method = "GET"
         allowed_fields = frozenset()
-    elif path == "/api/search":
+    elif path in {"/api/search", "/api/free/search"}:
         expected_method = "POST"
         allowed_fields = PROJECT_SEARCH_FIELDS - {AMOUNT_UNIT_CONFIRMATION_FIELD}
         required_fields = frozenset({"keywordGroups"})
         endpoint_label = "普通项目搜索"
+        if path == "/api/free/search":
+            allowed_fields = (allowed_fields - {"numPerPage"}) | {"sourceCode"}
     elif path == "/api/search/purchase":
         expected_method = "POST"
         allowed_fields = PURCHASE_SEARCH_FIELDS - {AMOUNT_UNIT_CONFIRMATION_FIELD}
@@ -2634,17 +2684,19 @@ def validate_endpoint_request(method: str, path: str, query: dict[str, Any] | No
             allowed_fields=sorted(allowed_fields),
         )
 
-    if path in {"/api/search", "/api/search/purchase", "/api/search/expiring"}:
+    if path in {"/api/search", "/api/free/search", "/api/search/purchase", "/api/search/expiring"}:
         if "areaIds" in effective_query:
             validate_area_query_scope(normalize_area_ids(effective_query["areaIds"]))
-        if path != "/api/search":
+        if path not in {"/api/search", "/api/free/search"}:
             normalize_word_list(effective_query.get("keywords"), "keywords", [])
         if "sortType" in effective_query:
             normalize_int_enum(effective_query["sortType"], "sortType", SEARCH_SORT_TYPES)
         if "purchasingUnitTypes" in effective_query:
             normalize_int_list_enum(effective_query["purchasingUnitTypes"], "purchasingUnitTypes", PURCHASING_UNIT_TYPES)
-    if path == "/api/search":
+    if path in {"/api/search", "/api/free/search"}:
         checked = dict(effective_query)
+        if path == "/api/free/search":
+            checked.pop("sourceCode", None)  # Request provenance, not a search filter.
         checked[AMOUNT_UNIT_CONFIRMATION_FIELD] = True
         normalize_query(checked)
     elif path == "/api/search/purchase":
@@ -2685,6 +2737,8 @@ class ApiClient:
         self.mock_dir = Path(mock_dir) if mock_dir else None
         self.last_request_query: dict[str, Any] | None = None
         self.last_request_path: str | None = None
+        self.access_mode = "authenticated"
+        self.access_mode_source = "default"
 
     def verify(self) -> dict[str, Any]:
         return self._request("GET", "/api/user/verify")
@@ -2693,6 +2747,11 @@ class ApiClient:
         return self._request("GET", "/api/user/entitlement")
 
     def search(self, query: dict[str, Any]) -> dict[str, Any]:
+        if self.access_mode == "guest":
+            body = {key: value for key, value in query.items() if key != "numPerPage"}
+            if body.get("currentPage", 1) > 10:
+                raise SkillError("FREE_PAGE_LIMIT", "免费查询最多查看前 10 页／300 条；匹配结果可能仍有更多。")
+            return self._request("POST", "/api/free/search", query=body)
         return self._request("POST", "/api/search", query=query)
 
     def search_purchase(self, query: dict[str, Any]) -> dict[str, Any]:
@@ -2730,13 +2789,16 @@ class ApiClient:
         return self._request(method, path_by_kind[kind], query=query)
 
     def _request(self, method: str, path: str, query: dict[str, Any] | None = None) -> Any:
+        if method == "POST" and path == "/api/free/search":
+            # Provenance comes from this package, never user filters or old state.
+            query = {**(query or {}), "sourceCode": PACKAGE_SOURCE_CODE}
         validate_endpoint_request(method, path, query, mock=self.mock_dir is not None)
         self.last_request_path = path
         if self.mock_dir:
             if query is not None:
                 self.last_request_query = json.loads(json.dumps(query))
             return self._mock_response(method, path, query)
-        if not self.api_key:
+        if not self.api_key and path != "/api/free/search":
             raise SkillError("MISSING_API_KEY", "还没有配置 API Key。")
 
         url = self.base_url + path
@@ -2749,11 +2811,21 @@ class ApiClient:
             else:
                 body = json.dumps(query, ensure_ascii=False).encode("utf-8")
         req = urllib.request.Request(url, data=body, headers=headers, method=method)
-        req.add_unredirected_header("qianlimaApiKey", self.api_key)
+        if self.api_key:
+            req.add_unredirected_header("qianlimaApiKey", self.api_key)
         try:
             with urllib.request.urlopen(req, timeout=30) as resp:
                 payload = json.loads(resp.read().decode("utf-8"))
         except urllib.error.HTTPError as exc:
+            # HTTP errors may contain the authoritative business error and limits.
+            try:
+                received = json.loads(exc.read().decode("utf-8"))
+            except (ValueError, UnicodeDecodeError, OSError, AttributeError, KeyError):
+                received = None
+            if isinstance(received, dict) and "code" in received:
+                return accept_api_response(path, received)
+            if exc.code == 503:
+                raise transport_failure(path, "503", "免费查询暂时繁忙，请稍后再试。" if path == "/api/free/search" else "服务暂时繁忙，请稍后再试。") from exc
             if exc.code == 429:
                 raise transport_failure(path, "429", "未取得 API 响应：请求过于频繁。") from exc
             if exc.code == 401:
@@ -2780,6 +2852,9 @@ class ApiClient:
         elif re.fullmatch(r"/api/(fullText|attachments|timeline)/[^/]+",path):
             endpoint,project_id = path.split("/")[-2:]
             candidates = [f"{endpoint}_{project_id}.json"]
+        elif path == "/api/free/search":
+            page = (query or {}).get("currentPage", 1)
+            candidates = [f"free_search_page_{page}.json", "free_search.json"]
         elif path == "/api/search":
             page = (query or {}).get("currentPage", 1)
             candidates = [f"search_page_{page}.json", "search.json"]
@@ -2902,6 +2977,7 @@ def project_message_payload(
     viewed_cards: list[dict[str, Any]],
     warnings: list[str],
     query_notice: str | None = None,
+    continuation_notice: str | None = None,
 ) -> dict[str, Any]:
     del capability
     area_expansion = district_area_expansion(effective_query) if total_count == 0 and not query_notice else None
@@ -2917,6 +2993,7 @@ def project_message_payload(
             next_page=bool(query_notice),
             include_query_conditions=not bool(query_notice),
             zero_reflections=zero_reflections,
+            continuation_notice=continuation_notice,
         )
     }
     if zero_reflections:
@@ -3019,6 +3096,225 @@ def apply_refine_aliases(capability: SearchCapabilitySpec, patch_query: dict[str
     return query
 
 
+FREE_CARD_FIELDS = frozenset({"id", "title", "purchasingUnit", "winningBidderUnit", "areaName", "infoType", "budgetAmount", "biddingAmount", "publishTime", "url"})
+ACCESS_MODES = ("auto", "guest", "authenticated")
+
+
+def validate_access_state(snapshot: dict[str, Any], *, validate_mode: bool = True) -> None:
+    if validate_mode and ("access_mode" in snapshot or "access_mode_source" in snapshot):
+        if snapshot.get("access_mode") not in {"guest", "authenticated"} or snapshot.get("access_mode_source") not in {"default", "explicit"}:
+            raise SkillError("FOLLOW_UP_UNAVAILABLE", "查询模式或选择来源缺失／无效，不能猜测是否使用积分。")
+    if "delivered_position" in snapshot and (type(snapshot["delivered_position"]) is not int or snapshot["delivered_position"] < 0):
+        raise SkillError("FOLLOW_UP_UNAVAILABLE", "已交付位置无效，无法准确续查。")
+    if "seen_ids" in snapshot and (not isinstance(snapshot["seen_ids"], list) or any(not isinstance(i, str) for i in snapshot["seen_ids"])):
+        raise SkillError("FOLLOW_UP_UNAVAILABLE", "已展示公告记录无效，无法准确续查。")
+    pending = snapshot.get("pending_cards", [])
+    if not isinstance(pending, list) or any(not isinstance(c, dict) for c in pending):
+        raise SkillError("FOLLOW_UP_UNAVAILABLE", "待展示记录无效，无法准确续查。")
+    if pending and "delivered_position" not in snapshot:
+        raise SkillError("FOLLOW_UP_UNAVAILABLE", "待展示记录缺少已交付位置。")
+    for field, maximum in (("viewable_page_count", 10), ("max_viewable_rows", 300)):
+        value = snapshot.get(field)
+        if value is not None and (type(value) is not int or not 0 <= value <= maximum):
+            raise SkillError("FOLLOW_UP_UNAVAILABLE", "免费边界无效，无法准确续查。")
+
+
+def persist_access_choice(snapshot: dict[str, Any], client: ApiClient) -> None:
+    # A new explicit instruction supersedes old preference even if the API fails.
+    if client.access_mode_source == "explicit" and (snapshot.get("access_mode"), snapshot.get("access_mode_source")) != (client.access_mode, client.access_mode_source) and snapshot.get("result_set_id") and not snapshot.get("_context_only"):
+        snapshot.update(access_mode=client.access_mode, access_mode_source=client.access_mode_source)
+        save_snapshot(snapshot)
+
+
+def select_access_mode(client: ApiClient, args: argparse.Namespace, result_type: str,
+                       snapshot: dict[str, Any] | None = None) -> None:
+    requested = getattr(args, "access_mode", "auto")
+    if snapshot is not None:
+        validate_access_state(snapshot, validate_mode=requested == "auto")
+    api_key = getattr(client, "api_key", os.environ.get("QIANLIMA_API_KEY"))
+    requested = getattr(args, "access_mode", "auto")
+    if requested not in ACCESS_MODES:
+        raise SkillError("INVALID_QUERY", "access-mode 仅支持 auto、guest、authenticated。")
+    source = "explicit" if requested != "auto" else "default"
+    if requested == "auto" and snapshot and snapshot.get("access_mode_source") == "explicit":
+        requested = snapshot.get("access_mode", "auto")
+        source = "explicit"
+    mode = ("authenticated" if api_key else "guest") if requested == "auto" and result_type == "project" else ("authenticated" if requested == "auto" else requested)
+    if mode == "guest" and result_type != "project":
+        raise SkillError("FREE_CAPABILITY_UNAVAILABLE", "免费查询仅支持普通标讯列表；此能力需要登录并使用账号积分。")
+    if mode == "authenticated" and not api_key and not getattr(client, "mock_dir", None):
+        raise SkillError("MISSING_API_KEY", "还没有配置 API Key。")
+    client.access_mode, client.access_mode_source = mode, source
+
+
+def mode_query_input(query: dict[str, Any], args: argparse.Namespace, result_type: str,
+                     snapshot: dict[str, Any] | None = None) -> dict[str, Any]:
+    requested = getattr(args, "access_mode", "auto")
+    if requested == "auto" and snapshot and snapshot.get("access_mode_source") == "explicit":
+        requested = snapshot.get("access_mode", "auto")
+    guest = requested == "guest" or (requested == "auto" and not os.environ.get("QIANLIMA_API_KEY"))
+    if result_type == "project" and guest:
+        return {**query, "numPerPage": 30}
+    return query
+
+
+def apply_access_paging(client: ApiClient, query: dict[str, Any]) -> None:
+    if client.access_mode == "guest":
+        query["numPerPage"] = 30  # Local executed page size; never sent to free API.
+
+
+def free_protocol_issues(data: Any, query: dict[str, Any]) -> list[str]:
+    if not isinstance(data, dict):
+        return ["免费响应缺少分页对象"]
+    issues = []
+    if "accessMode" in data and data["accessMode"] != "GUEST":
+        issues.append("免费响应模式异常")
+    for field, expected in (("numPerPage", 30), ("currentPage", query["currentPage"])):
+        if field in data and (type(data[field]) is not int or data[field] != expected):
+            issues.append(f"免费响应 {field} 异常")
+    for field, maximum in (("viewablePageCount", 10), ("maxViewableRows", 300)):
+        if field in data and (type(data[field]) is not int or not 0 <= data[field] <= maximum):
+            issues.append(f"免费响应 {field} 异常")
+    for field in ("rowCount", "pageCount"):
+        if type(data.get(field)) is not int or data[field] < 0:
+            issues.append(f"免费响应 {field} 异常")
+    total = data.get("rowCount")
+    if type(total) is int and total >= 0:
+        total_pages = (total + 29) // 30
+        # The deployed free API caps pageCount at ten; older responses used
+        # total pages. Both are consistent with fixed-size free pagination.
+        if type(data.get("pageCount")) is int and data["pageCount"] not in {total_pages, min(10, total_pages)}:
+            issues.append("免费响应 pageCount 与总数及固定页大小不一致")
+        if type(data.get("viewablePageCount")) is int and data["viewablePageCount"] > min(10, total_pages):
+            issues.append("免费可访问页数超过结果范围")
+    if not isinstance(data.get("list"), list) or len(data["list"]) > 30:
+        issues.append("免费响应列表异常")
+    return issues
+
+
+
+def free_pagination_facts(data: dict[str, Any]) -> dict[str, Any]:
+    """Local pagination derived from published limits; never rewrite API data."""
+    total = data.get("rowCount")
+    total_pages = (total + 29) // 30 if type(total) is int and total >= 0 else None
+    max_rows = data.get("maxViewableRows", 300)
+    viewable = data.get("viewablePageCount", min(10, total_pages) if total_pages is not None else None)
+    if type(max_rows) is int and type(viewable) is int:
+        viewable = min(viewable, (max_rows + 29) // 30)
+    return {"page_count": total_pages, "api_page_count": data.get("pageCount"),
+            "page_count_source": "rowCount_and_fixed_page_size_30",
+            "viewable_page_count": viewable, "max_viewable_rows": max_rows}
+
+
+def search_access_state(payload: dict[str, Any], client: ApiClient, query: dict[str, Any],
+                        cards: list[dict[str, Any]], previous: dict[str, Any] | None = None) -> dict[str, Any]:
+    seen = list((previous or {}).get("seen_ids", []))
+    seen = list(dict.fromkeys([*seen, *[str(c["id"]) for c in cards if isinstance(c, dict) and c.get("id") is not None]]))
+    return {"access_mode": client.access_mode, "access_mode_source": client.access_mode_source,
+            "viewable_page_count": payload.get("viewable_page_count"),
+            "max_viewable_rows": payload.get("max_viewable_rows"),
+            "delivered_position": payload.get("delivered_position", (query["currentPage"] - 1) * query["numPerPage"] + payload.get("api_returned_count", len(cards))),
+            "seen_ids": seen, "pending_cards": []}
+
+
+def validate_delivery_progress(snapshot: dict[str, Any]) -> None:
+    """Reject incomplete partial-page contexts rather than skip unseen results."""
+    delivered = snapshot.get("delivered_position")
+    if delivered is None:
+        return  # Legacy complete-page contexts retain their established behavior.
+    query = snapshot["effective_query"]
+    fetched_end = query["currentPage"] * query["numPerPage"]
+    total = usable_count(snapshot.get("total_count"))
+    if total is not None:
+        fetched_end = min(fetched_end, total)
+    # A saved response also tells us when the last fetched page was short.
+    if not snapshot.get("_context_only") and not snapshot.get("pending_cards"):
+        cards = snapshot.get("cards", [])
+        if delivered == (query["currentPage"] - 1) * query["numPerPage"] + len(cards):
+            return
+    pending = snapshot.get("pending_cards", [])
+    if delivered < fetched_end and delivered + len(pending) < fetched_end:
+        raise SkillError("FOLLOW_UP_UNAVAILABLE", "部分结果尚未展示，但续查上下文缺少剩余卡片；请恢复完整展示进度，不能跳过未展示记录。")
+
+
+def free_continuation_notice(snapshot: dict[str, Any]) -> str | None:
+    if snapshot.get("access_mode") != "guest":
+        return None
+    query = snapshot.get("effective_query") or {}
+    position = snapshot.get("delivered_position")
+    if position is None:
+        position = (query.get("currentPage", 1) - 1) * 30 + snapshot.get("api_returned_count", snapshot.get("returned_count", 0))
+    total = usable_count(snapshot.get("total_count"))
+    if total is not None and position >= total:
+        return "当前查询结果已展示完毕。"
+    rows = usable_count(snapshot.get("max_viewable_rows"))
+    pages = usable_count(snapshot.get("viewable_page_count"))
+    limit = min(300, rows if rows is not None else 300, 30 * (pages if pages is not None else 10))
+    if position >= limit:
+        return "已达到免费访问上限（最多前 10 页／300 条），匹配结果仍可能有更多。"
+    return None
+
+
+def pending_search_result(snapshot: dict[str, Any], client: ApiClient, capability: SearchCapabilitySpec,
+                          session_id: str) -> dict[str, Any] | None:
+    pending = snapshot.get("pending_cards", [])
+    if not pending:
+        return None
+    if not isinstance(pending, list) or any(not isinstance(c, dict) for c in pending):
+        raise SkillError("FOLLOW_UP_UNAVAILABLE", "待展示结果不完整，无法准确继续。")
+    delivered = snapshot.get("delivered_position")
+    if type(delivered) is not int or delivered < 0:
+        raise SkillError("FOLLOW_UP_UNAVAILABLE", "缺少待展示结果的准确位置。")
+    row_limit = snapshot.get("max_viewable_rows") if snapshot.get("max_viewable_rows") is not None else 300
+    page_limit = snapshot.get("viewable_page_count") if snapshot.get("viewable_page_count") is not None else 10
+    maximum = min(30, max(0, min(300, row_limit, page_limit * 30) - delivered)) if client.access_mode == "guest" else len(pending)
+    if not maximum:
+        return None  # Normal next boundary handling will report the free cap.
+    taken, remainder = pending[:maximum], pending[maximum:]
+    if client.access_mode == "guest":
+        taken = [{k: v for k, v in c.items() if k in FREE_CARD_FIELDS} for c in taken]
+        remainder = [{k: v for k, v in c.items() if k in FREE_CARD_FIELDS} for c in remainder]
+    seen = snapshot.get("seen_ids", [])
+    shown = [c for c in taken if str(c.get("id")) not in seen]
+    query = snapshot["effective_query"]
+    payload = {"ok": True, "result_type": capability.result_type, "cards": shown,
+               "returned_count": len(shown), "total_count": snapshot.get("total_count"),
+               "page_count": snapshot.get("page_count"), "effective_query": query,
+               "access_mode": client.access_mode, "access_mode_source": client.access_mode_source,
+               "delivered_position": delivered + len(taken), "from_pending_cache": True,
+               "viewable_page_count": snapshot.get("viewable_page_count"),
+               "max_viewable_rows": snapshot.get("max_viewable_rows"), "warnings": []}
+    payload.update(capability.message_renderer(capability=capability, effective_query=query,
+                   total_count=snapshot.get("total_count"), returned_count=len(shown), viewed_cards=shown,
+                   warnings=[], query_notice="继续展示已取得的结果，未重复请求接口。",
+                   **({"continuation_notice": free_continuation_notice(payload)} if capability.result_type == "project" else {})))
+    state = search_access_state(payload, client, query, shown, snapshot)
+    state["pending_cards"] = remainder
+    result = save_search_snapshot(session_id=session_id, result_type=capability.result_type,
+                                  effective_query=query, viewed_cards=shown, total_count=snapshot.get("total_count"),
+                                  page_count=snapshot.get("page_count"), parent_result_set_id=snapshot.get("result_set_id"), access_state=state)
+    payload["follow_up"] = follow_up_metadata(result)
+    if client.access_mode == "guest":
+        attach_free_link_facts(payload, shown, has_key=bool(client.api_key))
+    return payload
+
+
+def attach_free_failure(payload: dict[str, Any], client: ApiClient, error: SkillError) -> dict[str, Any]:
+    if client.access_mode == "guest":
+        # Replace only the generic error summary, retaining unrelated query warnings.
+        generic_summary = payload.get("message")
+        payload["warnings"] = list(dict.fromkeys([
+            *[warning for warning in payload.get("warnings", []) if warning != generic_summary],
+            error.message,
+        ]))
+        payload.update(access_mode="guest", access_mode_source=client.access_mode_source,
+                       user_message=error.message, message=error.message, retry_policy="no_automatic_retry")
+        if isinstance(error.data, dict):
+            payload["limit_response"] = error.data.get("data")
+        payload["agent_instruction"] = "按服务端实际原因说明，不猜限额档位或恢复时间，不自动重试、去掉 Key、切收费或拆条件绕限；费用与登录引导按游客规则及会话授权执行。"
+    return payload
+
+
 def search_payload_for_capability(
     *,
     capability: SearchCapabilitySpec,
@@ -3026,10 +3322,18 @@ def search_payload_for_capability(
     effective_query: dict[str, Any],
     warnings: list[str],
     query_notice: str | None = None,
+    skip: int = 0,
+    seen_ids: list[str] | None = None,
 ) -> tuple[dict[str, Any], list[dict[str, Any]], int, int]:
+    apply_access_paging(client, effective_query)
     data = validate_search_response(capability.search_call(client, effective_query))
     maintain_query_cache()
     cards = data.get("list") if isinstance(data, dict) else data
+    if client.access_mode == "guest" and not isinstance(cards, list):
+        return {"ok": True, "access_mode": "guest", "cards": [], "effective_query": effective_query,
+                "request_query": client.last_request_query,
+                "protocol_issues": free_protocol_issues(data, effective_query), "continuation_blocked": True,
+                "user_message": "查询已成功，但免费响应列表或分页异常，暂停自动续查；原始业务响应已保留。"}, None, None, None
     if not isinstance(cards, list):
         total = data.get("rowCount") if isinstance(data, dict) else None
         pages = data.get("pageCount") if isinstance(data, dict) else None
@@ -3038,7 +3342,13 @@ def search_payload_for_capability(
                    "total_count": total, "returned_count": None, "page_count": pages, "cards": cards,
                    "warnings": warnings, "user_message": "查询成功，项目列表信息：" + clean_user_value(cards)}
         return payload, None, total, usable_count(pages)
-    viewed_cards = [capability.card_view(card) for card in cards]
+    issues = free_protocol_issues(data, effective_query) if client.access_mode == "guest" else []
+    if client.access_mode == "guest":
+        cards = [{k: v for k, v in card.items() if k in FREE_CARD_FIELDS} for card in cards if isinstance(card, dict)]
+    selected = cards[skip:]
+    if seen_ids:
+        selected = [c for c in selected if not isinstance(c, dict) or str(c.get("id")) not in seen_ids]
+    viewed_cards = [capability.card_view(card) for card in selected]
     total_count = data.get("rowCount")
     payload: dict[str, Any] = {
         "ok": True,
@@ -3050,7 +3360,8 @@ def search_payload_for_capability(
         "result_type": capability.result_type,
         "request_api_path": client.last_request_path,
         "total_count": total_count,
-        "returned_count": len(cards),
+        "request_query": client.last_request_query,
+        "returned_count": len(viewed_cards),
         "api_total_count": total_count,
         "api_returned_count": len(data.get("list") or []),
         "page_count": data.get("pageCount"),
@@ -3058,6 +3369,13 @@ def search_payload_for_capability(
         "warnings": warnings,
         "cards": viewed_cards,
     }
+    if client.access_mode == "guest" and (type(total_count) is not int or total_count < 0):
+        payload.update(access_mode="guest", access_mode_source=client.access_mode_source,
+                       protocol_issues=issues, continuation_blocked=True,
+                       user_message="查询已成功，但免费响应缺少有效总数，暂停自动续查。\n" + "\n".join(user_card_list(viewed_cards)))
+        payload.update(free_pagination_facts(data))
+        attach_free_link_facts(payload, viewed_cards, has_key=bool(client.api_key))
+        return payload, None, total_count, None
     if capability.include_stage_on_success:
         payload["stage"] = capability.success_stage
     else:
@@ -3067,15 +3385,28 @@ def search_payload_for_capability(
             capability=capability,
             effective_query=effective_query,
             total_count=total_count if total_count is not None else EMPTY_DISPLAY,
-            returned_count=len(cards),
+            returned_count=len(viewed_cards),
             viewed_cards=viewed_cards,
             warnings=warnings,
             query_notice=query_notice,
+            **({"continuation_notice": free_continuation_notice({**payload, "access_mode": client.access_mode,
+                **(free_pagination_facts(data) if client.access_mode == "guest" else {})})} if capability.result_type == "project" else {}),
         )
     )
+    payload.update(access_mode=client.access_mode, access_mode_source=client.access_mode_source)
+    if client.access_mode == "guest":
+        payload["unexpected_free_fields"] = sorted({key for card in data.get("list", []) if isinstance(card, dict) for key in card if key not in FREE_CARD_FIELDS})
+        payload.update(free_pagination_facts(data))
+        payload.update(access_facts={"list_uses_points": False, "has_key": bool(client.api_key),
+                                     "detail_uses_points": True, "limits": {"minute": 20, "hour": 150, "day": 300}})
+        attach_free_link_facts(payload, viewed_cards, has_key=bool(client.api_key))
+        if issues:
+            payload.update(protocol_issues=issues, continuation_blocked=True,
+                           presentation_notice="免费响应模式或分页信息异常，保留业务响应，暂停自动续查。")
+            return payload, None, total_count, None
     if query_notice:
         payload["query_notice"] = query_notice
-    return payload, viewed_cards, total_count, usable_count(data.get("pageCount"))
+    return payload, viewed_cards, total_count, usable_count(payload.get("page_count"))
 
 
 def run_search(capability: SearchCapabilitySpec, raw_query: dict[str, Any], args: argparse.Namespace) -> dict[str, Any]:
@@ -3086,13 +3417,14 @@ def run_search(capability: SearchCapabilitySpec, raw_query: dict[str, Any], args
             getattr(args, "user_text", ""),
         )
         effective_query, warnings = capability.normalize_query(
-            source_checked_query,
+            mode_query_input(source_checked_query, args, capability.result_type),
             force_page=1 if not source_checked_query.get("currentPage") else None,
         )
     except SkillError as exc:
         return failure_payload(stage=capability_failure_stage(capability), error=exc, effective_query=raw_query)
 
     client = build_client(args)
+    select_access_mode(client, args, capability.result_type)
     try:
         payload, viewed_cards, total_count, page_count = search_payload_for_capability(
             capability=capability,
@@ -3114,7 +3446,7 @@ def run_search(capability: SearchCapabilitySpec, raw_query: dict[str, Any], args
             exc,
             target_right=entitlement_right_name(operation="search", result_type=capability.result_type),
         )
-        return payload
+        return attach_free_failure(payload, client, exc)
 
     if not isinstance(viewed_cards, list):
         return payload
@@ -3125,6 +3457,7 @@ def run_search(capability: SearchCapabilitySpec, raw_query: dict[str, Any], args
         viewed_cards=viewed_cards,
         total_count=total_count,
         page_count=page_count,
+        access_state=search_access_state(payload, client, effective_query, viewed_cards),
     )
     payload["follow_up"] = follow_up_metadata(snapshot)
     payload["request_query"] = client.last_request_query
@@ -3307,11 +3640,32 @@ def normalize_complex_operation(
 
 def cmd_preflight_complex(args: argparse.Namespace) -> dict[str, Any]:
     plan = parse_query_json(args.plan_json)
-    return preflight_complex_plan(
-        plan,
-        normalize_complex_operation,
-        user_text=args.user_text,
-    )
+    output = preflight_complex_plan(plan, normalize_complex_operation, user_text=args.user_text)
+    requested = getattr(args, "access_mode", "auto")
+    executable = []
+    for operation in output.get("approved_operations", []):
+        mode = requested if requested != "auto" else operation.get("access_mode", "auto")
+        if mode not in ACCESS_MODES:
+            return {"ok": False, "error_code": "FREE_CAPABILITY_UNAVAILABLE", "approved_operations": [],
+                    "user_message": "当前模式不支持计划中的数据源；免费仅支持普通标讯列表。"}
+        if mode == "guest" and operation["data_source"] != "project":
+            output.setdefault("unresolved_conditions", []).append({
+                "scope": "branch", "operation_id": operation["id"],
+                "error_code": "FREE_CAPABILITY_UNAVAILABLE",
+                "reason": "此分支需要登录并使用账号积分；保留待办，其他可执行免费分支继续。",
+            })
+            continue
+        operation["access_mode"] = mode
+        executable.append(operation)
+    if output.get("approved_operations"):
+        output["approved_operations"] = executable
+        output["approved_business_calls"] = len(executable)
+        output["ok"] = bool(executable)
+        if not executable:
+            output["error_code"] = "FREE_CAPABILITY_UNAVAILABLE"
+            output["fallback_status"] = "blocked"
+            output["user_message"] = "当前模式不支持计划中的数据源；免费仅支持普通标讯列表。"
+    return output
 
 
 @api_command
@@ -3360,6 +3714,9 @@ def query_continuation_context(args: argparse.Namespace, *, company: bool = Fals
             "page_count": usable_count(context.get("page_count")),
             "expires_at": expires_at_iso(), "_context_only": True,
         }
+        for field in ("access_mode", "access_mode_source", "viewable_page_count", "max_viewable_rows", "delivered_position", "seen_ids", "pending_cards"):
+            if field in context:
+                snapshot[field] = copy.deepcopy(context[field])
         return session_id, snapshot
     requested_session_id, result_set_id = follow_up_context(args)
     snapshot = load_snapshot(requested_session_id, result_set_id)
@@ -3375,30 +3732,52 @@ def cmd_next(args: argparse.Namespace) -> dict[str, Any]:
     result_set_id = snapshot.get("result_set_id")
     capability = search_capability(str(snapshot["result_type"]))
     previous_query = snapshot["effective_query"]
+    capability.normalize_query({**previous_query, AMOUNT_UNIT_CONFIRMATION_FIELD: True})
+    client = build_client(args)
+    select_access_mode(client, args, capability.result_type, snapshot)
+    previous_mode = snapshot.get("access_mode")
+    persist_access_choice(snapshot, client)
+    validate_delivery_progress(snapshot)
+    pending_payload = pending_search_result(snapshot, client, capability, session_id)
+    if pending_payload is not None:
+        return pending_payload
     current_page = previous_query["currentPage"]
+    previous_size = previous_query["numPerPage"]
+    delivered = snapshot.get("delivered_position", current_page * previous_size)
+    if type(delivered) is not int or delivered < 0:
+        raise SkillError("FOLLOW_UP_UNAVAILABLE", "缺少准确的已交付位置，无法续查。")
+    target_size = 30 if client.access_mode == "guest" or previous_mode == "guest" else previous_size
+    next_page, skip = divmod(delivered, target_size)
+    next_page += 1
+    if target_size == previous_size and not snapshot.get("pending_cards"):
+        next_page, skip = current_page + 1, 0
     page_count = usable_count(snapshot.get("page_count"))
-    if page_count is not None and current_page >= page_count:
-        payload = failure_payload(
-            stage="next",
-            error=SkillError("NO_MORE_PAGES", "当前结果已经是最后一页。"),
-            effective_query=previous_query,
-        )
+    total = usable_count(snapshot.get("total_count"))
+    if client.access_mode == "guest" and total is not None and total <= 300 and delivered >= total:
+        return failure_payload(stage="next", error=SkillError("NO_MORE_PAGES", "当前结果已经是最后一页。"), effective_query=previous_query)
+    if client.access_mode == "guest":
+        limit = min(300, snapshot.get("max_viewable_rows") if snapshot.get("max_viewable_rows") is not None else 300)
+        pages = min(10, usable_count(snapshot.get("viewable_page_count")) if snapshot.get("viewable_page_count") is not None else 10)
+        if delivered >= limit or next_page > pages:
+            return attach_free_failure(failure_payload(stage="next", error=SkillError("FREE_PAGE_LIMIT", "免费查询最多查看可访问的前 10 页／300 条；匹配结果可能仍有更多。"), effective_query=previous_query), client, SkillError("FREE_PAGE_LIMIT", "已达到免费可访问范围，匹配结果可能仍有更多。"))
+    if (previous_size != target_size and total is not None and delivered >= total) or (previous_size == target_size and page_count is not None and current_page >= page_count):
+        payload = failure_payload(stage="next", error=SkillError("NO_MORE_PAGES", "当前结果已经是最后一页。"), effective_query=previous_query)
         payload["follow_up"] = follow_up_metadata(snapshot)
         return payload
     next_query = dict(previous_query)
-    next_query["currentPage"] = current_page + 1
-    # Cached and supplied full contexts represent previously executed queries.
-    # Reuse their unit decisions for inherited values.
+    next_query.update(currentPage=next_page, numPerPage=target_size)
     next_query[AMOUNT_UNIT_CONFIRMATION_FIELD] = True
     effective_query, warnings = capability.normalize_query(next_query)
-    client = build_client(args)
+    if target_size != previous_size:
+        warnings.append("分页大小已变化；结果动态更新或综合排序的页内重排可能影响衔接，已过滤重叠位置和已展示公告，不保证无遗漏，不自动重放历史页。")
     try:
         payload, viewed_cards, total_count, page_count = search_payload_for_capability(
             capability=capability,
             client=client,
             effective_query=effective_query,
             warnings=warnings,
-            query_notice="当前查询条件未变，仅 currentPage 自动加 1。",
+            query_notice="当前查询条件未变，按已交付位置继续。",
+            skip=skip, seen_ids=snapshot.get("seen_ids", []),
         )
     except SkillError as exc:
         payload = failure_payload(stage="next", error=exc, effective_query=effective_query, warnings=warnings)
@@ -3410,10 +3789,11 @@ def cmd_next(args: argparse.Namespace) -> dict[str, Any]:
             exc,
             target_right=entitlement_right_name(operation="search", result_type=capability.result_type),
         )
-        return payload
+        return attach_free_failure(payload, client, exc)
     if not isinstance(viewed_cards, list):
         return payload
     if not snapshot.get("_context_only"):
+        snapshot.update(access_mode=client.access_mode, access_mode_source=client.access_mode_source)
         save_snapshot(snapshot)
     next_snapshot = save_search_snapshot(
         session_id=session_id,
@@ -3423,6 +3803,7 @@ def cmd_next(args: argparse.Namespace) -> dict[str, Any]:
         page_count=page_count,
         viewed_cards=viewed_cards,
         parent_result_set_id=result_set_id,
+        access_state=search_access_state(payload, client, effective_query, viewed_cards, snapshot),
     )
     payload["follow_up"] = follow_up_metadata(next_snapshot)
     payload["request_query"] = client.last_request_query
@@ -3439,6 +3820,7 @@ def cmd_refine(args: argparse.Namespace) -> dict[str, Any]:
     base_query = dict(snapshot["effective_query"])
     base_query.update(patch_query)
     base_query["currentPage"] = 1
+    base_query = mode_query_input(base_query, args, capability.result_type, snapshot)
     try:
         validate_refine_amount_changes(capability.result_type, snapshot["effective_query"], patch_query)
         validate_continuation_paging(base_query, capability.result_type)
@@ -3450,6 +3832,8 @@ def cmd_refine(args: argparse.Namespace) -> dict[str, Any]:
         return payload
 
     client = build_client(args)
+    select_access_mode(client, args, capability.result_type, snapshot)
+    persist_access_choice(snapshot, client)
     try:
         payload, viewed_cards, total_count, page_count = search_payload_for_capability(
             capability=capability,
@@ -3472,11 +3856,12 @@ def cmd_refine(args: argparse.Namespace) -> dict[str, Any]:
             exc,
             target_right=entitlement_right_name(operation="search", result_type=capability.result_type),
         )
-        return payload
+        return attach_free_failure(payload, client, exc)
 
     if not isinstance(viewed_cards, list):
         return payload
     if not snapshot.get("_context_only"):
+        snapshot.update(access_mode=client.access_mode, access_mode_source=client.access_mode_source)
         save_snapshot(snapshot)
     refined_snapshot = save_search_snapshot(
         session_id=session_id,
@@ -3486,6 +3871,7 @@ def cmd_refine(args: argparse.Namespace) -> dict[str, Any]:
         total_count=total_count,
         page_count=page_count,
         parent_result_set_id=result_set_id,
+        access_state=search_access_state(payload, client, effective_query, viewed_cards),
     )
     payload["follow_up"] = follow_up_metadata(refined_snapshot)
     payload["request_query"] = client.last_request_query
@@ -3937,6 +4323,8 @@ def cmd_area(args: argparse.Namespace) -> dict[str, Any]:
 
 
 def build_client(args: argparse.Namespace) -> ApiClient:
+    if getattr(args, "access_mode", "auto") == "guest" and getattr(args, "command", "search") not in {"search", "next", "refine"}:
+        raise SkillError("FREE_CAPABILITY_UNAVAILABLE", "免费查询仅支持普通标讯列表；此能力需要登录并使用账号积分。")
     return ApiClient(
         base_url=args.base_url or os.environ.get("QIANLIMA_BASE_URL", DEFAULT_BASE_URL),
         api_key=os.environ.get("QIANLIMA_API_KEY"),
@@ -4038,6 +4426,8 @@ def build_parser() -> argparse.ArgumentParser:
     enterprise.add_argument("--query-json", required=True)
     enterprise.set_defaults(func=cmd_enterprise)
 
+    for subparser in subparsers.choices.values():
+        subparser.add_argument("--access-mode", choices=ACCESS_MODES, default="auto")
     return parser
 
 

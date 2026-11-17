@@ -64,7 +64,7 @@ def interrupt_child(stage):
     secret_token = token
     config = Config()
     data = dict(action='send' if stage == 'send_in_flight' else 'verify',
-                phone='19900000001', smsCode='1234', consent=True,
+                phone='19900000001', smsCode='012345', consent=True,
                 configVersion='fake-v', replaceConfirmed=True)
     output = io.StringIO()
     with patch.object(account, 'CodexConfig', return_value=config), \
@@ -77,7 +77,7 @@ def interrupt_child(stage):
     print(json.dumps(dict(exit_code=code, result=json.loads(serialized), calls=calls,
                           old_value_preserved=config.value == 'previous-test-configuration',
                           new_value_present=config.value == key, closed=config.closed,
-                          secret_leaked=any(v in serialized for v in (key, token, '1234')))))
+                          secret_leaked=any(v in serialized for v in (key, token, '012345')))))
 
 
 @unittest.skipUnless(hasattr(signal, 'SIGINT') and hasattr(signal, 'pause'), 'POSIX signal test')

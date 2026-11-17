@@ -11,7 +11,7 @@ ROOT=Path(__file__).resolve().parents[1]
 class CliV3Tests(unittest.TestCase):
     def setUp(self):
         self.tmp=tempfile.TemporaryDirectory();self.addCleanup(self.tmp.cleanup)
-        self.env={**os.environ,'QIANLIMA_SKILL_STATE_DIR':self.tmp.name}
+        self.env={**os.environ,'QIANLIMA_API_KEY':'offline-cli-key','QIANLIMA_SKILL_STATE_DIR':self.tmp.name}
         self.query={'keywordGroups':[{'keywords':['空调','新风'],'matchScopes':[2]},{'keywords':['安装','改造'],'matchScopes':[8,10]}],'procurementCategories':[0,1],'procurementMethods':[0,2],'fundsSources':[1,5],'hasAnnex':0,'hasAgency':0,'registrationStatus':0,'beginTime':'2026-09-01 10:00:00','endTime':'2026-09-14 18:30:00','numPerPage':2}
 
     def call(self,command,*args):

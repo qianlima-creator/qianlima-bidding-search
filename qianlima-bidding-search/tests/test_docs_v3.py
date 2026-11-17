@@ -29,7 +29,7 @@ class DocumentationV3Tests(unittest.TestCase):
         ui=(ROOT/'agents/openai.yaml').read_text()
         self.assertIn('allow_implicit_invocation: true',ui)
         self.assertIn('$qianlima-bidding-search',ui)
-        self.assertEqual(json.loads((ROOT/'manifest.json').read_text())['version'],'1.0.2')
+        self.assertEqual(json.loads((ROOT/'manifest.json').read_text())['version'],'1.0.3')
 
     def test_all_relative_document_links_exist(self):
         for p in self.docs:
@@ -55,7 +55,12 @@ class DocumentationV3Tests(unittest.TestCase):
             for block in re.findall(r'```json\s*\n(.*?)\n```',p.read_text(),re.S):
                 data=json.loads(block);count+=1
                 if isinstance(data,dict) and 'keywordGroups' in data:
-                    normalized,_=r.normalize_query(data)
+                    filters = dict(data)
+                    if p.name == 'api-free-search.md':
+                        r.validate_endpoint_request('POST', '/api/free/search', data)
+                        self.assertEqual(filters.pop('sourceCode'), r.PACKAGE_SOURCE_CODE)
+                        self.assertNotIn('numPerPage', data)
+                    normalized,_=r.normalize_query(filters)
                     self.assertEqual(normalized['keywordGroups'],data['keywordGroups'])
                     self.assertFalse(set(normalized)&{'keywords','keywordsSearchType','matchScopes','procurementMethod'})
         self.assertGreaterEqual(count,15)

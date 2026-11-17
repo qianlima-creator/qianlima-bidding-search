@@ -19,7 +19,7 @@ class ApiV3Tests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
-        self.env = patch.dict(os.environ, {'QIANLIMA_SKILL_STATE_DIR':self.tmp.name})
+        self.env = patch.dict(os.environ, {'QIANLIMA_API_KEY':'offline-regression-key', 'QIANLIMA_SKILL_STATE_DIR':self.tmp.name})
         self.env.start(); self.addCleanup(self.env.stop)
 
     def test_group_query_preserves_independent_scopes_and_filters(self):

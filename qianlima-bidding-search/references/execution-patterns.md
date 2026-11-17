@@ -1,10 +1,8 @@
 # 命令与复杂预检样板
 
-skill 根目录运行 `python3 scripts/qianlima_skill.py`；参数来自用户、枚举或结果，不将用户文本拼成 shell 代码。
+根目录运行 `python3 scripts/qianlima_skill.py`；用户文本不拼入 shell。
 
-## 简单请求直接执行
-
-最小 search 见 [普通项目](capabilities/project-search.md#最短调用入口)。
+search 见 [普通项目](capabilities/project-search.md#最短调用入口)。
 
 ## 可直接表达的多条件
 
@@ -22,7 +20,7 @@ skill 根目录运行 `python3 scripts/qianlima_skill.py`；参数来自用户�
 {"conditions":[{"id":"a","type":"keyword_group","value":{"keywords":["空调"],"matchScopes":[2,9]}},{"id":"b","type":"keyword_group","value":{"keywords":["新风"],"matchScopes":[2,9]}},{"id":"c","type":"keyword_group","value":{"keywords":["安装"],"matchScopes":[2,9]}}],"logic_groups":[{"id":"root","operator":"OR","condition_ids":["a"],"group_ids":["both"]},{"id":"both","operator":"AND","condition_ids":["b","c"]}],"root_group_id":"root","operations":[{"id":"op1","action":"search","data_source":"project"}]}
 ```
 
-运行 `preflight-complex --plan-json '<上述JSON>' --user-text '<原话>'` 一次，按 `approved_operations` 原样调用；无批准操作不调业务。不填条件 normalized/applies_to 或操作 condition_ids/query；组引用须合法。
+运行 `preflight-complex --plan-json '<上述JSON>' --user-text '<原话>'` 一次，按 `approved_operations`（含 `access_mode`）原样调用；无批准操作不调业务。不填 normalized/applies_to、condition_ids/query；组引用合法。
 
 同位置词组预检为一次查询；医院设备 A 或学校设备 B，以及标题“物业”或附件“服务方案”，都按配对/位置分支执行，见 [分支示例](branch-query-examples.md)。
 

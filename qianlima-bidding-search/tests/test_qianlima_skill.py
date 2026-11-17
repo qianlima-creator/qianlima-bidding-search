@@ -81,6 +81,9 @@ def subtract_one_month(value: dt.date) -> dt.date:
 class QianlimaSkillTests(unittest.TestCase):
     def setUp(self) -> None:
         self._follow_up_by_state: dict[str, dict[str, str]] = {}
+        credentials = mock.patch.dict(os.environ, {"QIANLIMA_API_KEY": "offline-regression-key"})
+        credentials.start()
+        self.addCleanup(credentials.stop)
 
     def complex_project_plan(self) -> dict:
         return {
@@ -1061,7 +1064,8 @@ class QianlimaSkillTests(unittest.TestCase):
         self.assertFalse(payload["ok"])
         self.assertEqual(payload["error_code"], "MISSING_API_KEY")
         self.assertIn("[前往官网](https://ai.qianlima.com/?source=b21e4d10ecdea318b517c48a)", payload["user_message"])
-        self.assertEqual(payload["user_message"].count("**"), 4)
+        self.assertIn("使用账号积分", payload["user_message"])
+        self.assertNotIn("注册流程", payload["user_message"])
 
     def test_invalid_api_key_has_user_friendly_message(self) -> None:
         spec = importlib.util.spec_from_file_location("qianlima_skill", SCRIPT)
@@ -1360,7 +1364,7 @@ class QianlimaSkillTests(unittest.TestCase):
         self.assertIn("120.00", message)
         self.assertIn("招标公告", message)
         self.assertNotIn("公告-招标公告", message)
-        self.assertIn("[查看详情](https://www.qianlima.com/bid-101.html)", message)
+        self.assertIn("[北京市第一医院实验室设备采购招标公告](https://www.qianlima.com/bid-101.html)", message)
         self.assertIn("我按北京", message)
         self.assertNotIn("本次生效条件", message)
         self.assertNotIn("- 关键词：", message)

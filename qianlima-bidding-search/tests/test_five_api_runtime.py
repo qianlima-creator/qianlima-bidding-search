@@ -32,7 +32,7 @@ class FiveApiRuntimeTests(unittest.TestCase):
         self.assertIn('询价', runtime.user_query_sentence(query))
 
     def test_clear_patch_survives_preflight_and_actual_refine(self):
-        with tempfile.TemporaryDirectory() as state_dir, patch.dict(os.environ, {'QIANLIMA_SKILL_STATE_DIR': state_dir}):
+        with tempfile.TemporaryDirectory() as state_dir, patch.dict(os.environ, {'QIANLIMA_API_KEY':'offline-regression-key', 'QIANLIMA_SKILL_STATE_DIR': state_dir}):
             original, _ = runtime.normalize_query(project(
                 areaIds=[2], beginAmount=5000000, procurementMethods=[0], hasAnnex=1,
                 registrationStatus=0, beginTime='2026-08-15', endTime='2026-09-15'))
